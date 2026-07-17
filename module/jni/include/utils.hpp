@@ -35,6 +35,12 @@ namespace Utils
 
     bool switchMountNS(int pid);
     int isUserAppUID(int uid);
+    /*
+     * Converts a JNI jstring (e.g. AppSpecializeArgs::nice_name) to a
+     * std::string. Returns an empty string if env or str is null, or if
+     * the JVM fails to hand back the UTF chars.
+     */
+    std::string jstringToUtf8(JNIEnv *env, jstring str);
     bool hookPLTByName(zygisk::Api *api, const std::string &libName, const std::string &symbolName, void *hookFunc, void **origFunc);
     int forkAndInvoke(const std::function<int()> &lambda);
     const char *getExtErrorsBehavior(const Parsers::mountinfo_entry &entry);

@@ -21,6 +21,16 @@ gradle-app.setting
 # JDT-specific (Eclipse Java Development Tools)
 .classpath
 
+### Android Studio / local machine config
+.idea/
+local.properties
+*.iml
+.cxx/
+
+### macOS
+.DS_Store
+**/.DS_Store
+
 ### VisualStudioCode.gitignore
 .vscode/*
 !.vscode/tasks.json

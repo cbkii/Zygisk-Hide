@@ -44,6 +44,20 @@ bool Utils::hookPLTByName(zygisk::Api *api, const std::string &libName, const st
     return false;
 }
 
+std::string Utils::jstringToUtf8(JNIEnv *env, jstring str)
+{
+    if (env == nullptr || str == nullptr)
+        return {};
+
+    const char *chars = env->GetStringUTFChars(str, nullptr);
+    if (chars == nullptr)
+        return {};
+
+    std::string result(chars);
+    env->ReleaseStringUTFChars(str, chars);
+    return result;
+}
+
 int Utils::isUserAppUID(int uid)
 {
     int appid = uid % AID_USER_OFFSET;

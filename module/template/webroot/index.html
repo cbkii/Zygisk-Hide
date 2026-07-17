@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zygisk Hide</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #121212;
+    --card: #1e1e1e;
+    --border: #2c2c2c;
+    --text: #eaeaea;
+    --sub: #9a9a9a;
+    --accent: #4caf50;
+    --danger: #cf6679;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Roboto, "Segoe UI", sans-serif;
+    -webkit-user-select: none;
+  }
+  header {
+    padding: 20px 16px 12px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  h1 { margin: 0 0 2px; font-size: 20px; }
+  .subtitle { color: var(--sub); font-size: 13px; }
+  .searchbar {
+    margin: 12px 16px 4px;
+    display: flex;
+    gap: 8px;
+  }
+  .searchbar input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 14px;
+  }
+  .filters {
+    display: flex;
+    gap: 6px;
+    padding: 8px 16px 4px;
+    overflow-x: auto;
+  }
+  .chip {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--sub);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .chip.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 4px 16px 0;
+    padding: 10px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .toggle-row span { font-size: 13px; color: var(--text); }
+  .toggle-row .switch { width: 40px; height: 24px; }
+  .toggle-row .switch input:checked + .slider:before { transform: translateX(16px); }
+  .debug-section { margin: 10px 16px 0; }
+  .debug-btn {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--sub);
+    border-radius: 10px;
+    font-size: 12.5px;
+    text-align: left;
+  }
+  .debug-output {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: #0a0a0a;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: #9adba0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    -webkit-user-select: text;
+    user-select: text;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  #status {
+    margin: 4px 16px;
+    font-size: 12.5px;
+    color: var(--sub);
+    min-height: 16px;
+  }
+  #list { padding: 4px 16px 100px; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .row .info { flex: 1; min-width: 0; }
+  .row .pkg {
+    font-size: 13.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row .uid { font-size: 11px; color: var(--sub); }
+  .switch {
+    position: relative;
+    width: 44px;
+    height: 26px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0;
+    background: #3a3a3a;
+    border-radius: 999px;
+    transition: .15s;
+  }
+  .slider:before {
+    content: "";
+    position: absolute;
+    height: 20px; width: 20px;
+    left: 3px; top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: .15s;
+  }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(18px); }
+  .empty { text-align: center; color: var(--sub); padding: 40px 16px; font-size: 13px; }
+  .bar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    display: flex;
+    gap: 10px;
+  }
+  button {
+    flex: 1;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+  #saveBtn { background: var(--accent); color: #0c0c0c; }
+  #saveBtn:disabled { opacity: .5; }
+  #reloadBtn { background: var(--card); color: var(--text); border: 1px solid var(--border); flex: 0 0 46px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Zygisk Hide</h1>
+  <div class="subtitle">Root/Zygisk hide &mdash; per app</div>
+</header>
+
+<div class="searchbar">
+  <input id="search" type="text" placeholder="Filter by package name&hellip;" autocomplete="off">
+</div>
+
+<div class="filters">
+  <div class="chip active" data-filter="all">All</div>
+  <div class="chip" data-filter="enabled">Hidden only</div>
+</div>
+
+<div class="toggle-row">
+  <span>Show system apps</span>
+  <label class="switch">
+    <input type="checkbox" id="showSystemToggle">
+    <span class="slider"></span>
+  </label>
+</div>
+
+<div class="debug-section">
+  <button id="debugToggleBtn" class="debug-btn">Show raw APatch package_config &#9662;</button>
+  <pre id="debugOutput" class="debug-output" style="display:none;"></pre>
+</div>
+
+<div id="status">Loading&hellip;</div>
+<div id="list"></div>
+
+<div class="bar">
+  <button id="reloadBtn" title="Reload">&#8635;</button>
+  <button id="saveBtn" disabled>Save changes</button>
+</div>
+
+<script>
+/*
+ * Correct KernelSU/APatch WebUI bridge protocol, matching the officially
+ * published `kernelsu` npm package (verified against its source):
+ *
+ *   window.ksu.exec(command, optionsJsonString, callbackFuncName)
+ *
+ * callbackFuncName is a STRING naming a function the native side will
+ * define on `window` and invoke with (errno, stdout, stderr). It CANNOT
+ * be a real JS function reference -- addJavascriptInterface bridges can
+ * only pass serializable primitives across, never closures.
+ */
+let ksuCallbackCounter = 0;
+function ksuExec(cmd, options = {}) {
+  const bridgeCall = new Promise((resolve, reject) => {
+    if (typeof window.ksu === "undefined" || !window.ksu.exec) {
+      reject(new Error("window.ksu bridge not found — open this page from your root manager's module list, not a regular browser."));
+      return;
+    }
+    const callbackFuncName = `exec_callback_${Date.now()}_${ksuCallbackCounter++}`;
+    window[callbackFuncName] = (errno, stdout, stderr) => {
+      delete window[callbackFuncName];
+      resolve({ code: errno, stdout: stdout || "", stderr: stderr || "" });
+    };
+    try {
+      window.ksu.exec(cmd, JSON.stringify(options), callbackFuncName);
+    } catch (e) {
+      delete window[callbackFuncName];
+      reject(e);
+    }
+  });
+
+  // Fail loudly instead of hanging forever if the bridge never calls back
+  // (e.g. a manager fork with a slightly different protocol).
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Timed out waiting for root manager (10s) — the exec bridge may not have responded.")), 10000)
+  );
+
+  return Promise.race([bridgeCall, timeout]);
+}
+
+function toast(msg) {
+  if (window.ksu && window.ksu.toast) { window.ksu.toast(msg); return; }
+  const t = document.getElementById("status");
+  if (t) t.textContent = msg;
+}
+
+const CONFIG_PATH = "/data/adb/modules/zygisk-hide/config.json";
+
+const state = {
+  packages: [],       // [{pkg, uid}]
+  config: {},         // { "com.example": true, ... }
+  dirty: false,
+  filter: "all",       // "all" | "enabled"
+  showSystemApps: false,
+  query: ""
+};
+
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("list");
+const saveBtn = document.getElementById("saveBtn");
+const reloadBtn = document.getElementById("reloadBtn");
+const searchEl = document.getElementById("search");
+const showSystemToggle = document.getElementById("showSystemToggle");
+
+function b64encode(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+async function loadConfig() {
+  // Base64 round-trip avoids any quoting issues with cat/echo.
+  const res = await ksuExec(`[ -f '${CONFIG_PATH}' ] && base64 '${CONFIG_PATH}' || echo ''`);
+  const raw = res.stdout.trim();
+  if (!raw) { state.config = {}; return; }
+  try {
+    const json = decodeURIComponent(escape(atob(raw)));
+    state.config = JSON.parse(json);
+  } catch (e) {
+    console.error("config parse failed", e);
+    state.config = {};
+  }
+}
+
+async function saveConfig() {
+  const json = JSON.stringify(state.config, null, 2);
+  const b64 = b64encode(json);
+  const dir = CONFIG_PATH.substring(0, CONFIG_PATH.lastIndexOf("/"));
+  const cmd = `mkdir -p '${dir}' && echo '${b64}' | base64 -d > '${CONFIG_PATH}' && echo OK`;
+  const res = await ksuExec(cmd);
+  return res.stdout.includes("OK");
+}
+
+async function loadPackages() {
+  // -3 = third-party (user-installed) apps; -U prints uid alongside each entry.
+  const userRes = await ksuExec("pm list packages -3 -U");
+  const allRes  = await ksuExec("pm list packages -U");
+  const parse = (out) => out.split("\n").map(line => {
+    // Lines look like: "package:com.example.app uid:10123"
+    const m = line.match(/^package:(\S+)\s+uid:(\d+)/);
+    return m ? { pkg: m[1], uid: m[2] } : null;
+  }).filter(Boolean);
+
+  state.userPkgs = parse(userRes.stdout);
+  state.allPkgs = parse(allRes.stdout).sort((a, b) => a.pkg.localeCompare(b.pkg));
+  state.userPkgs.sort((a, b) => a.pkg.localeCompare(b.pkg));
+}
+
+function currentList() {
+  // System-apps visibility and the enabled/all filter are independent
+  // axes: the toggle controls which pool we draw from, the chip further
+  // narrows it to only-hidden.
+  let base = state.showSystemApps ? state.allPkgs : state.userPkgs;
+  if (state.filter === "enabled") {
+    base = base.filter(p => state.config[p.pkg]);
+  }
+  if (state.query) {
+    const q = state.query.toLowerCase();
+    base = base.filter(p => p.pkg.toLowerCase().includes(q));
+  }
+
+  // Hidden apps float to the top; within each group, alphabetical.
+  // (No-op when filter === "enabled", since everything left is hidden.)
+  return [...base].sort((a, b) => {
+    const aHidden = !!state.config[a.pkg];
+    const bHidden = !!state.config[b.pkg];
+    if (aHidden !== bHidden) return aHidden ? -1 : 1;
+    return a.pkg.localeCompare(b.pkg);
+  });
+}
+
+function render() {
+  const items = currentList();
+  if (!items.length) {
+    listEl.innerHTML = `<div class="empty">No apps match.</div>`;
+    return;
+  }
+  listEl.innerHTML = items.map(p => {
+    const checked = !!state.config[p.pkg];
+    return `
+      <div class="row">
+        <div class="info">
+          <div class="pkg">${p.pkg}</div>
+          <div class="uid">uid ${p.uid}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" data-pkg="${p.pkg}" ${checked ? "checked" : ""}>
+          <span class="slider"></span>
+        </label>
+      </div>`;
+  }).join("");
+
+  listEl.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const pkg = cb.getAttribute("data-pkg");
+      if (cb.checked) state.config[pkg] = true;
+      else delete state.config[pkg];
+      state.dirty = true;
+      saveBtn.disabled = false;
+    });
+  });
+}
+
+function updateStatus() {
+  const hiddenCount = Object.keys(state.config).length;
+  const poolLabel = state.showSystemApps
+    ? `${state.allPkgs.length} apps (incl. system)`
+    : `${state.userPkgs.length} user apps`;
+  statusEl.textContent = `${poolLabel} · ${hiddenCount} currently hidden`;
+}
+
+async function init() {
+  statusEl.textContent = "Loading installed apps and config…";
+  try {
+    await Promise.all([loadPackages(), loadConfig()]);
+    updateStatus();
+    render();
+  } catch (e) {
+    statusEl.textContent = "Error: " + e.message;
+  }
+}
+
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    state.filter = chip.getAttribute("data-filter");
+    render();
+  });
+});
+
+showSystemToggle.addEventListener("change", () => {
+  state.showSystemApps = showSystemToggle.checked;
+  updateStatus();
+  render();
+});
+
+// Read-only viewer for APatch/FolkPatch's own package_config file, so it
+// can be inspected straight from the phone without adb. Never writes to
+// this file -- purely diagnostic, to help design a future direct
+// integration against the REAL on-device format.
+const debugToggleBtn = document.getElementById("debugToggleBtn");
+const debugOutput = document.getElementById("debugOutput");
+let debugLoaded = false;
+
+debugToggleBtn.addEventListener("click", async () => {
+  const isHidden = debugOutput.style.display === "none";
+  if (!isHidden) {
+    debugOutput.style.display = "none";
+    debugToggleBtn.textContent = "Show raw APatch package_config \u25BE";
+    return;
+  }
+
+  debugOutput.style.display = "block";
+  debugToggleBtn.textContent = "Hide raw APatch package_config \u25B4";
+
+  if (debugLoaded) return;
+  debugOutput.textContent = "Loading…";
+  try {
+    const res = await ksuExec("cat /data/adb/ap/package_config 2>&1 || echo '(file not found at this path)'");
+    debugOutput.textContent = res.stdout.trim() || "(empty file)";
+    debugLoaded = true;
+  } catch (e) {
+    debugOutput.textContent = "Error reading file: " + e.message;
+  }
+});
+
+searchEl.addEventListener("input", () => {
+  state.query = searchEl.value.trim();
+  render();
+});
+
+reloadBtn.addEventListener("click", () => {
+  if (state.dirty && !confirm("Discard unsaved changes?")) return;
+  state.dirty = false;
+  saveBtn.disabled = true;
+  init();
+});
+
+saveBtn.addEventListener("click", async () => {
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving…";
+  try {
+    const ok = await saveConfig();
+    if (ok) {
+      state.dirty = false;
+      toast("Saved. Reboot or restart the target app for changes to apply.");
+      render();
+    } else {
+      toast("Save failed — check module folder permissions.");
+      saveBtn.disabled = false;
+    }
+  } catch (e) {
+    toast("Save error: " + e.message);
+    saveBtn.disabled = false;
+  }
+  saveBtn.textContent = "Save changes";
+});
+
+init();
+</script>
+</body>
+</html>

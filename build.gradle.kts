@@ -11,7 +11,7 @@ val commitHash: String by extra {
     result.standardOutput.asText.get().trim()
 }
 
-val moduleId by extra("zygisk-assistant")
-val moduleName by extra("Zygisk Assistant")
-val verName by extra("v2.1.4")
-val verCode by extra(214)
+val moduleId by extra("zygisk-hide")
+val moduleName by extra("Zygisk Hide")
+val verName by extra("v3.1.0")
+val verCode by extra(310)

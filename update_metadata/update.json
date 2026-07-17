@@ -1,6 +1,6 @@
 {
-    "version": "v2.1.4",
-    "versionCode": 214,
-    "zipUrl": "https://github.com/snake-4/Zygisk-Assistant/releases/download/v2.1.4/Zygisk-Assistant-v2.1.4-1013f8a-release.zip",
-    "changelog": "https://raw.githubusercontent.com/snake-4/Zygisk-Assistant/main/update_metadata/CHANGELOG.md"
+    "version": "v3.1.0",
+    "versionCode": 310,
+    "zipUrl": "https://github.com/kgr-online/Zygisk-Assistant/releases/download/v3.1.0/Zygisk-Hide-v3.1.0-release.zip",
+    "changelog": "https://raw.githubusercontent.com/kgr-online/Zygisk-Assistant/main/update_metadata/CHANGELOG.md"
 }
