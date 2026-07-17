@@ -4,4 +4,4 @@ version=${versionName}
 versionCode=${versionCode}
 author=kgr
 description=A Zygisk module to hide root on a per-app basis
-updateJson=https://raw.githubusercontent.com/kgr-online/Zygisk-Assistant/main/update_metadata/update.json
+updateJson=https://raw.githubusercontent.com/kgr-online/Zygisk-Hide/main/update_metadata/update.json
