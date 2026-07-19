@@ -1,14 +1,10 @@
-<h3 align="center">Zygisk Assistant</h3>
+<h3 align="center">Zygisk Hide</h3>
 
   <p align="center">
-    A Zygisk module that aims to hide the existence root and Zygisk.
+    A Zygisk module that aims to hide the existence root and Zygisk, on a per-app basis.
     <br />
     <br />
-    <a href="https://github.com/snake-4/Zygisk-Assistant/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/snake-4/Zygisk-Assistant/issues">Request Feature</a>
-    ·
-    <a href="https://github.com/snake-4/Zygisk-Assistant/releases">Latest Release</a>
+    <a href="https://github.com/kgr-online/Zygisk-Hide/releases">Latest Release</a>
   </p>
 </div>
 
@@ -19,7 +15,7 @@
 Using the **release** build is recommended over the debug build. Only use debug builds if you are going to make a bug report.
 
 ### KernelSU & APatch users:
-1. Install ZygiskNext.
+1. Install ZygiskNext or NeoZygisk
 1. Make sure the option `Umount modules/Exclude modifications` is enabled for the target app in the KernelSU/APatch Manager.
 1. Disable `Enforce DenyList` in ZygiskNext settings if there is one.
 
