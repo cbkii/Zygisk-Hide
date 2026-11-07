@@ -15,3 +15,14 @@
 
 ## 2.1.2
 + Added scripts to reset sensitive props.
+
+## v3.2.0-alpha1 (development)
+
+- Target Alpha 31000 through the unchanged public Zygisk API v4.
+- Fix subprocess selection, failed-child reporting, bounded companion I/O,
+  namespace FD handoff and unload-after-restoration lifecycle.
+- Remove heuristic native-bridge editing and native global-property/remount work.
+- Default global boot-property scripts to opt-in; add no SELinux rule.
+- Persist and atomically save target config outside module updates.
+- Add host regression tests, package validation and Pixel qualification guidance.
+- Device qualification and Google verdicts remain unverified.

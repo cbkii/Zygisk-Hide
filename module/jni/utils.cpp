@@ -8,6 +8,8 @@
 #include <sched.h>
 #include <fcntl.h>
 #include <endian.h>
+#include <signal.h>
+#include "runtime_support.hpp"
 
 #include "map_parser.hpp"
 #include "utils.hpp"
@@ -88,13 +90,22 @@ int Utils::forkAndInvoke(const std::function<int()> &lambda)
     if (pid == -1)
         return -1;
 
-    if (pid == 0) // Child process
-        exit(lambda());
+    if (pid == 0) _exit(lambda());
 
-    // Parent process
     int status = -1;
-    waitpid(pid, &status, 0);
-    return status;
+    auto until = Runtime::deadline(750);
+    for (;;) {
+        int result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) return status;
+        if (result < 0 && errno != EINTR) return -1;
+        if (Runtime::Clock::now() >= until) {
+            kill(pid, SIGKILL);
+            // Reap our own child. Client IPC has an independent hard deadline.
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            return -1;
+        }
+        usleep(1000);
+    }
 }
 
 constexpr off_t EXT_SUPERBLOCK_OFFSET = 0x400;

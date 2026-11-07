@@ -1,102 +1,108 @@
-#include <fstream>
-#include <sstream>
-#include <cctype>
-#include <algorithm>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
-
 #include "config.hpp"
 #include "logging.hpp"
 
-using namespace Config;
-
-namespace
-{
-    // Reads the whole config file into memory. Returns an empty string if
-    // missing or unreadable, which callers treat as "no apps configured".
-    std::string readConfigFile()
-    {
-        std::ifstream file(CONFIG_PATH, std::ios::binary);
-        if (!file)
-            return {};
-
-        std::ostringstream ss;
-        ss << file.rdbuf();
-        return ss.str();
-    }
-
-    /*
-     * Looks for the exact quoted key "packageName" in a flat JSON object
-     * and checks whether its value is the literal `true`.
-     *
-     * This is intentionally NOT a general JSON parser -- it's a narrow
-     * scanner purpose-built for the one format our own WebUI ever writes:
-     * a single-level object mapping package name strings to booleans,
-     * e.g. { "com.example.app": true }. Package names can't contain a
-     * literal `"`, so a `"pkg"` substring match is unambiguous.
-     */
-    bool findTruthyKey(const std::string &json, const std::string &packageName)
-    {
-        const std::string needle = "\"" + packageName + "\"";
-        size_t pos = 0;
-        while ((pos = json.find(needle, pos)) != std::string::npos)
-        {
-            size_t cursor = pos + needle.size();
-
-            while (cursor < json.size() && std::isspace(static_cast<unsigned char>(json[cursor])))
-                cursor++;
-
-            if (cursor >= json.size() || json[cursor] != ':')
-            {
-                pos += needle.size();
-                continue;
-            }
-            cursor++;
-
-            while (cursor < json.size() && std::isspace(static_cast<unsigned char>(json[cursor])))
-                cursor++;
-
-            if (json.compare(cursor, 4, "true") == 0)
-                return true;
-
-            // Key matched but the value wasn't `true` (e.g. explicit
-            // `false`). Keep scanning in case of a duplicate key further
-            // down; otherwise this key is simply "not hidden".
-            pos += needle.size();
+bool Config::parse(std::string_view json, Targets &targets) {
+    targets.clear();
+    if (json.size() > MAX_CONFIG_SIZE) return false;
+    Targets parsed;
+    size_t pos = 0;
+    auto space = [&]() {
+        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\n' ||
+               json[pos] == '\r' || json[pos] == '\t')) ++pos;
+    };
+    auto token = [&](char c) {
+        space();
+        if (pos == json.size() || json[pos] != c) return false;
+        ++pos;
+        return true;
+    };
+    if (!token('{')) return false;
+    space();
+    if (pos < json.size() && json[pos] != '}') {
+        for (;;) {
+            if (!token('"')) return false;
+            size_t start = pos;
+            while (pos < json.size() && json[pos] != '"') ++pos;
+            std::string key(json.substr(start, pos - start));
+            if (!Runtime::validName(key, true) || !token('"') || !token(':')) return false;
+            space();
+            bool value;
+            if (json.substr(pos, 4) == "true") { value = true; pos += 4; }
+            else if (json.substr(pos, 5) == "false") { value = false; pos += 5; }
+            else return false;
+            if (!parsed.emplace(key, value).second || parsed.size() > 1024) return false;
+            space();
+            if (pos >= json.size() || json[pos] != ',') break;
+            ++pos;
         }
+    }
+    if (!token('}')) return false;
+    space();
+    if (pos != json.size()) return false;
+    targets = std::move(parsed);
+    return true;
+}
+
+bool Config::matches(const Targets &targets, const std::string &process, const std::string &package) {
+    auto enabled = [&](const std::string &key) {
+        auto it = targets.find(key);
+        return it != targets.end() && it->second;
+    };
+    if (!Runtime::validName(process, true)) return false;
+    if (enabled(process)) return true;
+    if (Runtime::validName(package) && enabled(package)) return true;
+    // Conventional package:private_process naming, including isolated helpers.
+    // Custom names use app_data_dir or the manager's denylist flag.
+    auto colon = process.find(':');
+    return colon != std::string::npos && enabled(process.substr(0, colon));
+}
+
+bool Config::isPackageHidden(const std::string &process, const std::string &package) {
+    int fd = open(CONFIG_PATH, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return false;
+    struct stat st{};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0 ||
+        (st.st_mode & 0022) || st.st_size < 0 || st.st_size > static_cast<off_t>(MAX_CONFIG_SIZE)) {
+        close(fd);
+        LOGW("Rejected unsafe or oversized target configuration");
         return false;
     }
+    std::string json;
+    char block[4096];
+    ssize_t n;
+    while ((n = read(fd, block, sizeof(block))) != 0) {
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 || json.size() + static_cast<size_t>(n) > MAX_CONFIG_SIZE) { close(fd); return false; }
+        json.append(block, static_cast<size_t>(n));
+    }
+    close(fd);
+    Targets targets;
+    if (!parse(json, targets)) {
+        LOGW("Invalid target configuration; manager denylist remains independent");
+        return false;
+    }
+    return matches(targets, process, package);
 }
 
-bool Config::isPackageHidden(const std::string &packageName)
-{
-    if (packageName.empty())
-        return false;
-
-    std::string json = readConfigFile();
-    if (json.empty())
-        return false;
-
-    return findTruthyKey(json, packageName);
+bool Config::readString(int fd, std::string &value, Runtime::Deadline until) {
+    uint16_t length = 0;
+    if (!Runtime::readExact(fd, &length, sizeof(length), until) || length > 512) return false;
+    value.resize(length);
+    return Runtime::readExact(fd, value.data(), length, until);
 }
-
-bool Config::queryIsPackageHidden(int companionFd, const std::string &packageName)
-{
-    if (companionFd == -1)
-        return false;
-
-    uint8_t tag = static_cast<uint8_t>(Request::CONFIG_QUERY);
-    uint16_t len = static_cast<uint16_t>(std::min<size_t>(packageName.size(), UINT16_MAX));
-
-    if (write(companionFd, &tag, sizeof(tag)) != (ssize_t)sizeof(tag))
-        return false;
-    if (write(companionFd, &len, sizeof(len)) != (ssize_t)sizeof(len))
-        return false;
-    if (len > 0 && write(companionFd, packageName.data(), len) != (ssize_t)len)
-        return false;
-
-    uint8_t result = 0;
-    if (read(companionFd, &result, sizeof(result)) != (ssize_t)sizeof(result))
-        return false;
-
-    return result != 0;
+bool Config::writeString(int fd, const std::string &value, Runtime::Deadline until) {
+    if (value.size() > 512) return false;
+    uint16_t length = static_cast<uint16_t>(value.size());
+    return Runtime::writeExact(fd, &length, sizeof(length), until) &&
+           Runtime::writeExact(fd, value.data(), length, until);
+}
+bool Config::queryIsPackageHidden(int fd, const std::string &process, const std::string &package) {
+    auto until = Runtime::deadline();
+    uint8_t tag = static_cast<uint8_t>(Request::CONFIG_QUERY), result = 0;
+    return Runtime::writeExact(fd, &tag, sizeof(tag), until) &&
+           writeString(fd, process, until) && writeString(fd, package, until) &&
+           Runtime::readExact(fd, &result, sizeof(result), until) && result == 1;
 }

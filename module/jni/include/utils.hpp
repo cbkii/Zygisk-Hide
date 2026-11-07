@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <functional>
 #include "logging.hpp"
-#include "zygisk.hpp"
+#include <zygisk.hpp>
 #include "mountinfo_parser.hpp"
 
 #define DCL_HOOK_FUNC(ret, func, ...)         \

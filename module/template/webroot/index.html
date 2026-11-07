@@ -179,7 +179,7 @@
 
 <header>
   <h1>Zygisk Hide</h1>
-  <div class="subtitle">Root/Zygisk hide &mdash; per app</div>
+  <div class="subtitle">Namespace cleanup &mdash; per app</div>
 </header>
 
 <div class="searchbar">
@@ -204,6 +204,7 @@
   <pre id="debugOutput" class="debug-output" style="display:none;"></pre>
 </div>
 
+<p style="margin:12px 16px;color:var(--sub);font-size:13px">Selections add to the manager denylist. Turning a toggle off does not override that list. Loaded SELinux policy and other modules' executable memory remain outside this module's control.</p>
 <div id="status">Loading&hellip;</div>
 <div id="list"></div>
 
@@ -259,7 +260,7 @@ function toast(msg) {
   if (t) t.textContent = msg;
 }
 
-const CONFIG_PATH = "/data/adb/modules/zygisk-hide/config.json";
+const CONFIG_PATH = "/data/adb/zygisk-hide/config.json";
 
 const state = {
   packages: [],       // [{pkg, uid}]
@@ -284,14 +285,20 @@ function b64encode(str) {
 async function loadConfig() {
   // Base64 round-trip avoids any quoting issues with cat/echo.
   const res = await ksuExec(`[ -f '${CONFIG_PATH}' ] && base64 '${CONFIG_PATH}' || echo ''`);
+  if (res.code !== 0) throw new Error(res.stderr || "Cannot read configuration");
   const raw = res.stdout.trim();
   if (!raw) { state.config = {}; return; }
   try {
     const json = decodeURIComponent(escape(atob(raw)));
-    state.config = JSON.parse(json);
+    const config = JSON.parse(json);
+    if (!config || Array.isArray(config) || typeof config !== "object" ||
+        Object.entries(config).some(([key, value]) => !/^[A-Za-z0-9_.:]{1,512}$/.test(key) || typeof value !== "boolean")) {
+      throw new Error("Expected a flat map of package/process names to booleans");
+    }
+    state.config = config;
   } catch (e) {
     console.error("config parse failed", e);
-    state.config = {};
+    throw new Error("Invalid target configuration: " + e.message);
   }
 }
 
@@ -299,9 +306,19 @@ async function saveConfig() {
   const json = JSON.stringify(state.config, null, 2);
   const b64 = b64encode(json);
   const dir = CONFIG_PATH.substring(0, CONFIG_PATH.lastIndexOf("/"));
-  const cmd = `mkdir -p '${dir}' && echo '${b64}' | base64 -d > '${CONFIG_PATH}' && echo OK`;
+  const cmd = `(
+    umask 077
+    [ ! -L '${dir}' ] && [ ! -L '${CONFIG_PATH}' ] || exit 1
+    mkdir -p '${dir}' || exit 1
+    chmod 700 '${dir}' || exit 1
+    tmp=$(mktemp '${dir}/.config.XXXXXX') || exit 1
+    trap 'rm -f "$tmp"' EXIT
+    printf '%s' '${b64}' | base64 -d > "$tmp" || exit 1
+    chmod 600 "$tmp" && chown 0:0 "$tmp" || exit 1
+    mv -f "$tmp" '${CONFIG_PATH}' && echo OK
+  )`;
   const res = await ksuExec(cmd);
-  return res.stdout.includes("OK");
+  return res.code === 0 && res.stdout.trim() === "OK";
 }
 
 async function loadPackages() {
@@ -389,6 +406,9 @@ async function init() {
     updateStatus();
     render();
   } catch (e) {
+    state.dirty = false;
+    saveBtn.disabled = true;
+    listEl.replaceChildren();
     statusEl.textContent = "Error: " + e.message;
   }
 }
@@ -457,7 +477,8 @@ saveBtn.addEventListener("click", async () => {
     const ok = await saveConfig();
     if (ok) {
       state.dirty = false;
-      toast("Saved. Reboot or restart the target app for changes to apply.");
+      toast("Saved. Reboot for isolated/app-zygote processes; otherwise restart the target app.");
+      updateStatus();
       render();
     } else {
       toast("Save failed — check module folder permissions.");

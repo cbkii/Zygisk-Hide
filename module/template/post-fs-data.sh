@@ -1,4 +1,6 @@
 MODPATH="${0%/*}"
+# Default: leave PIF/TEE property ownership and SELinux permissions alone.
+[ -f /data/adb/zygisk-hide/legacy-props ] || exit 0
 . $MODPATH/common_func.sh
 
 # Conditional early sensitive properties

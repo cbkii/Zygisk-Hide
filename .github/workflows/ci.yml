@@ -1,7 +1,10 @@
 name: CI
-on: [push]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -10,41 +13,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: "recursive"
-
+          submodules: recursive
+      - name: Host regression tests
+        run: ./tests/run.sh
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
+          distribution: temurin
           java-version: 17
-
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install pinned SDK and NDK
+        run: sdkmanager 'platforms;android-34' 'ndk;28.0.13004108'
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Build with Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Build module ZIPs
         run: ./gradlew moduleZipRelease moduleZipDebug
-
-      - name: Set CI Variables
-        if: success()
-        id: prepareArtifact
+      - name: Validate exact packages
         run: |
-          echo "releaseName=$(basename module/build/outputs/zip/*-release.zip .zip)" >> $GITHUB_OUTPUT
-          echo "debugName=$(basename module/build/outputs/zip/*-debug.zip .zip)" >> $GITHUB_OUTPUT
-
-      - name: Upload Release Artifact
+          python3 tests/test_packaging.py module/build/outputs/zip/*.zip
+          sha256sum module/build/outputs/zip/*.zip > module/build/outputs/zip/SHA256SUMS
+      - name: Upload modules and checksums
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.prepareArtifact.outputs.releaseName }}
-          path: "module/build/outputs/zip/release"
-
-      - name: Upload Debug Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.prepareArtifact.outputs.debugName }}
-          path: "module/build/outputs/zip/debug"
-
-      - name: Create a release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: module/build/outputs/zip/*.zip
+          name: Zygisk-Hide-${{ github.sha }}
+          path: |
+            module/build/outputs/zip/*.zip
+            module/build/outputs/zip/SHA256SUMS
+          if-no-files-found: error
