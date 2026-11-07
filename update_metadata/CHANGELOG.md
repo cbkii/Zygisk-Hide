@@ -25,4 +25,6 @@
 - Default global boot-property scripts to opt-in; add no SELinux rule.
 - Persist and atomically save target config outside module updates.
 - Add host regression tests, package validation and Pixel qualification guidance.
+- Fix repeated/recursive finalization and allocation-failure handling during module unload.
+- Disable the alpha update feed pending a qualified release.
 - Device qualification and Google verdicts remain unverified.

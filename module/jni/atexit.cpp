@@ -58,16 +58,18 @@ namespace {
 
         if (func != nullptr) {
             atexit_lock();
-            count++;
             if (!g_array) {
                 g_array = reinterpret_cast<AtexitEntry*>(malloc(capacity * sizeof(AtexitEntry)));
+                if (!g_array) { atexit_unlock(); return -1; }
             }
-            if (count > capacity) [[unlikely]] {
-                capacity *= 2;
-                g_array = reinterpret_cast<AtexitEntry*>(realloc(g_array, capacity * sizeof(AtexitEntry)));
+            if (count == capacity) [[unlikely]] {
+                const size_t nextCapacity = capacity * 2;
+                auto *next = reinterpret_cast<AtexitEntry*>(realloc(g_array, nextCapacity * sizeof(AtexitEntry)));
+                if (!next) { atexit_unlock(); return -1; }
+                g_array = next;
+                capacity = nextCapacity;
             }
-            g_array[count - 1].fn = func;
-            g_array[count - 1].arg = arg;
+            g_array[count++] = {func, arg};
             result = 0;
             atexit_unlock();
         }
@@ -79,32 +81,18 @@ namespace {
     // https://cs.android.com/android/platform/superproject/main/+/main:bionic/libc/arch-common/bionic/crtbegin_so.c;l=34;drc=5501003be73b73de59044b44b12f6e20ba6e0021
     extern "C" [[gnu::used]] void __cxa_finalize(void * /* dso */) { // NOLINT(bugprone-reserved-identifier)
         atexit_lock();
-        restart:
-        if (count > 0) {
-            size_t total = count;
-            for (size_t i = count - 1;; --i) {
-                if (g_array[i].fn == nullptr) {
-                    if (i == 0) break;
-                    continue;
-                }
-
-                // Clear the entry in the array to avoid calling an entry again
-                // if __cxa_finalize is called recursively.
-                const AtexitEntry entry = g_array[i];
-                g_array[i] = {};
-
-                atexit_unlock();
-                entry.fn(entry.arg);
-                atexit_lock();
-
-                if (count != total) {
-                    goto restart;
-                }
-                if (i == 0) break;
-            }
-
-            free(g_array);
+        // Pop before invoking user code. Recursive finalization or a callback
+        // registering another callback can replace/free the array while unlocked.
+        while (count > 0) {
+            const AtexitEntry entry = g_array[--count];
+            atexit_unlock();
+            entry.fn(entry.arg);
+            atexit_lock();
         }
+        free(g_array);
+        g_array = nullptr;
+        count = 0;
+        capacity = 8;
         atexit_unlock();
     }
 }

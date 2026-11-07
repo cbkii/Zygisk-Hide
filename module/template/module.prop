@@ -4,4 +4,3 @@ version=${versionName}
 versionCode=${versionCode}
 author=snake-4, kgr, cbkii
 description=A Zygisk module to hide root on a per-app basis
-updateJson=https://raw.githubusercontent.com/cbkii/Zygisk-Hide/main/update_metadata/update.json

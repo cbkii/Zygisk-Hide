@@ -86,6 +86,8 @@ supports 16 KiB page alignment. Host tests cover config, process selection,
 short/dead-peer/timeout IPC and hook restoration failures; they do not simulate
 Android permissions or prove the loader ABI works on a phone.
 
-No release is automatically published by this development workflow.
+No release is automatically published by this development workflow. The alpha
+ZIP intentionally has no automatic update feed until this fork publishes a
+qualified release; it cannot silently install another fork's update.
 
 MIT licence. Original credits and licence notices are retained in the source.
