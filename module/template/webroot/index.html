@@ -282,20 +282,40 @@ function b64encode(str) {
   return btoa(unescape(encodeURIComponent(str)));
 }
 
+function parseTargetConfig(text) {
+  if (new TextEncoder().encode(text).length > 65536) throw new Error("Config exceeds 64 KiB");
+  const config = Object.create(null);
+  let pos = 0;
+  const whitespace = () => { while (pos < text.length && /[ \t\r\n]/.test(text[pos])) ++pos; };
+  const token = c => { whitespace(); if (text[pos++] !== c) throw new Error("Invalid target JSON"); };
+  token('{'); whitespace();
+  if (text[pos] !== '}') {
+    for (;;) {
+      const entry = /"([A-Za-z0-9_.:]{1,512})"[ \t\r\n]*:[ \t\r\n]*(true|false)/y;
+      entry.lastIndex = pos;
+      const match = entry.exec(text);
+      if (!match || Object.hasOwn(config, match[1])) throw new Error("Invalid or duplicate target entry");
+      config[match[1]] = match[2] === 'true';
+      if (Object.keys(config).length > 1024) throw new Error("More than 1024 targets");
+      pos = entry.lastIndex; whitespace();
+      if (text[pos] !== ',') break;
+      ++pos; whitespace();
+    }
+  }
+  token('}'); whitespace();
+  if (pos !== text.length) throw new Error("Trailing target JSON input");
+  return config;
+}
+
 async function loadConfig() {
   // Base64 round-trip avoids any quoting issues with cat/echo.
-  const res = await ksuExec(`[ -f '${CONFIG_PATH}' ] && base64 '${CONFIG_PATH}' || echo ''`);
+  const res = await ksuExec(`if [ ! -e '${CONFIG_PATH}' ]; then printf 'e30='; elif [ -f '${CONFIG_PATH}' ] && [ ! -L '${CONFIG_PATH}' ]; then base64 '${CONFIG_PATH}'; else exit 1; fi`);
   if (res.code !== 0) throw new Error(res.stderr || "Cannot read configuration");
   const raw = res.stdout.trim();
-  if (!raw) { state.config = {}; return; }
+  if (!raw) throw new Error("Empty target configuration");
   try {
     const json = decodeURIComponent(escape(atob(raw)));
-    const config = JSON.parse(json);
-    if (!config || Array.isArray(config) || typeof config !== "object" ||
-        Object.entries(config).some(([key, value]) => !/^[A-Za-z0-9_.:]{1,512}$/.test(key) || typeof value !== "boolean")) {
-      throw new Error("Expected a flat map of package/process names to booleans");
-    }
-    state.config = config;
+    state.config = parseTargetConfig(json);
   } catch (e) {
     console.error("config parse failed", e);
     throw new Error("Invalid target configuration: " + e.message);
@@ -304,6 +324,7 @@ async function loadConfig() {
 
 async function saveConfig() {
   const json = JSON.stringify(state.config, null, 2);
+  parseTargetConfig(json);
   const b64 = b64encode(json);
   const dir = CONFIG_PATH.substring(0, CONFIG_PATH.lastIndexOf("/"));
   const cmd = `(
@@ -392,7 +413,7 @@ function render() {
 }
 
 function updateStatus() {
-  const hiddenCount = Object.keys(state.config).length;
+  const hiddenCount = Object.values(state.config).filter(Boolean).length;
   const poolLabel = state.showSystemApps
     ? `${state.allPkgs.length} apps (incl. system)`
     : `${state.userPkgs.length} user apps`;

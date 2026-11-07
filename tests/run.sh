@@ -10,5 +10,6 @@ ${CXX:-g++} -std=c++20 -Wall -Wextra -Werror -pthread \
     -Itests/stubs -Imodule/jni/include -Imodule/jni/aosp_fd_utils \
     tests/lifecycle_test.cpp module/jni/config.cpp -o "$out/lifecycle-test"
 "$out/lifecycle-test"
+node tests/webui_test.js
 python3 tests/test_packaging.py
 printf 'Host regression checks passed. Android/runtime checks remain separate.\n'
