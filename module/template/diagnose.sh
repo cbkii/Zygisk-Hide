@@ -1,14 +1,16 @@
 #!/system/bin/sh
 # Read-only root-side evidence. No keybox, accounts, app data or memory bytes.
 usage() {
-    echo 'Usage: diagnose.sh PID | diagnose.sh --package PACKAGE'
+    echo 'Usage: diagnose.sh PID | diagnose.sh --package PACKAGE | diagnose.sh --inline-scope [PROCESS ...]'
     exit 2
 }
 
 package=
+scope_only=
 script_dir=${0%/*}
 [ "$script_dir" != "$0" ] || script_dir=.
 case "$1" in
+    --inline-scope) scope_only=1; shift ;;
     --package)
         [ "$#" = 2 ] || usage
         package=$2
@@ -18,6 +20,45 @@ case "$1" in
     *) [ "$#" = 1 ] || usage ;;
 esac
 [ "$(id -u)" = 0 ] || { echo 'Root required'; exit 2; }
+
+if [ -n "$scope_only" ]; then
+    if [ "$#" = 0 ]; then
+        set -- com.google.android.gms com.google.android.gms.unstable com.google.android.gms.persistent \
+            com.android.vending com.google.android.gsf com.google.android.apps.walletnfcrel
+    fi
+    [ "$#" -le 24 ] || usage
+    for process do
+        case "$process" in ''|*[!A-Za-z0-9_.:]*) usage ;; esac
+        [ "${#process}" -le 512 ] || usage
+    done
+
+    inline=/data/adb/modules/inline_hook_invalidate
+    if [ ! -f "$inline/module.prop" ]; then
+        echo 'inline_module=absent'
+        exit 0
+    fi
+    state=enabled
+    [ ! -e "$inline/disable" ] || state=disabled
+    [ ! -e "$inline/remove" ] || state=removal-pending
+    printf 'inline_module=%s\n' "$state"
+    awk '/^version=/ {print; exit}' "$inline/module.prop"
+    echo 'Module markers describe disk state. Reboot after changing module enablement.'
+    config="$inline/config.txt"
+    if [ ! -f "$config" ] || [ -L "$config" ] || [ ! -r "$config" ]; then
+        echo 'inline_config=missing, unreadable or symlinked'
+        exit 1
+    fi
+    size=$(stat -c '%s' "$config") || exit 1
+    case "$size" in ''|*[!0-9]*) exit 1 ;; esac
+    if [ "$size" -gt 65536 ]; then
+        echo 'inline_config=exceeds diagnostic size limit'
+        exit 1
+    fi
+    stat -c 'inline_config_mode=%a' "$config"
+    echo 'Exact v1.0 scope from the saved config. Runtime remap activity requires separate evidence.'
+    awk -v "targets=$*" -f "$script_dir/diagnose-inline.awk" "$config"
+    exit $?
+fi
 
 if [ -n "$package" ]; then
     # Exact name, private process and AOSP app-zygote naming. Capture at most

@@ -36,3 +36,8 @@
 - Match AOSP app-zygote names when the loader identifies the child zygote.
 - Compare mapping signatures, mount markers and identities across an app's
   process family.
+
+## v3.2.0-alpha3 (development)
+
+- Add read-only Inline Hook Invalidate scope checks for Google and explicit
+  process names, with a separate device A/B procedure.

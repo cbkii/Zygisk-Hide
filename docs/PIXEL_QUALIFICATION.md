@@ -142,3 +142,41 @@ The app-zygote matcher strips the AOSP
 only when the loader identifies the specialization as a child zygote. Scope
 that reaches an isolated helper depends on the callbacks the loader actually
 delivers. The package diagnostic also supports a numeric PID for custom names.
+
+## Inline Hook Invalidate and Google verification
+
+The audited arm64 binary matches the v1.0 release SHA-256. Its source uses an
+exact process-name allowlist for the ART remap worker, but never requests
+Zygisk library unloading when it skips a process. This accounts for a module
+mapping outside the allowlist. On selected processes, it replaces executable
+pages from disk and checks them every 100 ms. That can undo other hooks or
+interfere with running code. Keep the Google stack and detector test scoped
+separately when checking for a conflict.
+[Version 1.0 implementation](https://github.com/0bbedCode/InlineHookInvalidate/blob/v1/module/jni/main.cpp)
+
+Read the saved scope for Google services and optionally for exact names from
+the running process list. This reports configuration, including the module's
+enable/disable marker and file mode. Check after reboot for runtime evidence.
+
+```sh
+su -c 'sh /data/adb/modules/zygisk-hide/diagnose.sh --inline-scope'
+su -c 'sh /data/adb/modules/zygisk-hide/diagnose.sh --inline-scope com.google.android.gms.unstable com.android.vending com.eltavine.duckdetector'
+```
+
+1. Record the same checker's name and request type, response/error and Play
+   Store certification status while Inline Hook Invalidate is enabled.
+2. Disable only Inline Hook Invalidate in Magisk, reboot, and repeat the
+   checks. Hold PIF, TEESimulator, the Zygisk provider and network constant.
+3. Capture Duck and Google process families with `diagnose.sh --package`.
+   Check for loss of the 880640-byte mapping and whether any verdict changes.
+   The Inline Hook Invalidate log tag can show worker activity for a PID if
+   its logs are available. Compare logs from the same boot and request.
+4. Repeat with the module restored if you need to confirm a reproducible
+   difference. Record certification separately from Integrity API results.
+
+Hide's namespace cleanup and its unload request apply to Hide's own lifecycle.
+An upstream fix for Inline Hook Invalidate would request early unloading on
+skipped processes, strictly scope the allowlist and move its configuration
+behind the root companion. A worker that remains active requires its library
+to remain mapped. Live ART executable-page replacement needs its own
+device-specific safety tests before wider deployment.
