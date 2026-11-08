@@ -1,0 +1,75 @@
+name: Publish tested prerelease
+
+on:
+  push:
+    branches: [codex/publish-v3.2.0-alpha3]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: 'v3.2.0-alpha3'
+      SOURCE_SHA: 'b7b702597170573e31eef02ba7e6d4462b361b85'
+      BUILD_RUN: '42452009765'
+      ARTIFACT: 'Zygisk-Hide-b7b702597170573e31eef02ba7e6d4462b361b85'
+      INPUT_ZIP: 'Zygisk-Hide-v3.2.0-alpha3-release.zip'
+      RELEASE_ZIP: 'Zygisk-Hide-v3.2.0-alpha3-release.zip'
+      ZIP_SHA256: '17a4bb04865e32ca967da7a03a22da446aaaa2a4e88fce5e042bfeace734dc92'
+    steps:
+      - name: Verify and publish the tested module ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1 || gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::The release or tag already exists"
+            exit 1
+          fi
+
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" |
+            jq -e --arg sha "$SOURCE_SHA" '.head_sha == $sha and .conclusion == "success"' >/dev/null
+          gh run download "$BUILD_RUN" --name "$ARTIFACT" --dir "$RUNNER_TEMP/candidate"
+          cd "$RUNNER_TEMP/candidate"
+          printf '%s  %s\n' "$ZIP_SHA256" "$INPUT_ZIP" | sha256sum -c -
+          unzip -tq "$INPUT_ZIP"
+          unzip -p "$INPUT_ZIP" module.prop > module.prop
+          grep -Fx 'id=zygisk-hide' module.prop
+          grep -Fx 'version=v3.2.0-alpha3 (b7b7025-release)' module.prop
+          grep -Fx 'versionCode=322' module.prop
+          if [[ "$INPUT_ZIP" != "$RELEASE_ZIP" ]]; then
+            mv -- "$INPUT_ZIP" "$RELEASE_ZIP"
+          fi
+          sha256sum "$RELEASE_ZIP" > SHA256SUMS
+
+          cat > notes.md <<'EOF'
+          Alpha 31000 compatibility work, optional provider-managed unmounting and process-family diagnostics.
+          Adds read-only Inline Hook Invalidate scope diagnostics.
+
+          This is a manual-install alpha. CI validated the ZIP. Runtime qualification on the Pixel 9a is pending.
+          Install the module ZIP through your root manager and reboot. To roll back, disable the module and reboot.
+
+          Source: [`b7b7025`](https://github.com/cbkii/Zygisk-Hide/commit/b7b702597170573e31eef02ba7e6d4462b361b85) · [Build and checks](https://github.com/cbkii/Zygisk-Hide/actions/runs/42452009765)
+          EOF
+          gh release create "$TAG" "$RELEASE_ZIP" SHA256SUMS --target "$SOURCE_SHA" \
+            --title 'Zygisk Hide v3.2.0-alpha3' --notes-file notes.md --draft --prerelease --latest=false
+          gh release view "$TAG" --json isDraft,isPrerelease,targetCommitish,assets |
+            jq -e --arg sha "$SOURCE_SHA" --arg zip "$RELEASE_ZIP" '
+              .isDraft and .isPrerelease and .targetCommitish == $sha and
+              ([.assets[].name] | sort) == ([$zip, "SHA256SUMS"] | sort)
+            ' >/dev/null
+          gh release download "$TAG" --dir "$RUNNER_TEMP/draft-check"
+          (cd "$RUNNER_TEMP/draft-check" && sha256sum -c SHA256SUMS)
+          cmp SHA256SUMS "$RUNNER_TEMP/draft-check/SHA256SUMS"
+
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha' | grep -Fx "$SOURCE_SHA"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/release-check"
+          (cd "$RUNNER_TEMP/release-check" && sha256sum -c SHA256SUMS)
+          cmp SHA256SUMS "$RUNNER_TEMP/release-check/SHA256SUMS"
