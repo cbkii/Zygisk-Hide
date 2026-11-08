@@ -13,5 +13,5 @@ val commitHash: String by extra {
 
 val moduleId by extra("zygisk-hide")
 val moduleName by extra("Zygisk Hide")
-val verName by extra("v3.2.0-alpha1")
-val verCode by extra(320)
+val verName by extra("v3.2.0-alpha2")
+val verCode by extra(321)

@@ -84,3 +84,61 @@ The previous two anonymous RX regions (880640 and 827392 bytes) predated Hide
 installation. This patch cannot establish their owner. A clean Hide unload is a
 necessary regression gate, not proof those regions disappear. Use loader/module
 A/B evidence before changing memory handling; never unmap unidentified code.
+
+## November 8 audit and alpha2 comparison
+
+The archived main-process snapshot (PID 6293) showed two unlabeled private RX
+regions of 860 KiB and 808 KiB, separate from the ART JIT memfds. That snapshot
+contained zero matching root mount-marker rows. It did not sample the app zygote
+or the isolated processes visible in the process inventory. Package enumeration
+failed with a Binder transaction error, leaving no usable flagged-UID inventory.
+Zygisk Hide did not appear in the module inventory for this capture.
+
+The effective policy sample contains Magisk socket access and broad
+`magisk_file` and `xposed_data` allows. The active files attribute the broad
+`magisk_file` grants and `system_server` execmem to Zygisk Next, the Xposed
+rules to Vector, and netd execmem to hostsredirect. The presence of a rule in
+a module's installed files by itself does not identify all its live providers.
+
+The [ReZygisk injector](https://github.com/PerformanC/ReZygisk/blob/4aff785a1b82250ab0be7b5e4cae5cdb2f4d988b/loader/src/injector/hook.c)
+and [NeoZygisk injector](https://github.com/JingMatrix/NeoZygisk/blob/cc0bbba7c2e0215b0f3fe1fb27e2ee88ade9e688/loader/src/injector/hook.cpp)
+restore their own hooks before unmapping their own loader ranges. They have
+loader-level knowledge of those ranges and the return path. Both also support
+provider-controlled mount cleanup through the public module option. Their
+[ReZygisk rules](https://github.com/PerformanC/ReZygisk/blob/4aff785a1b82250ab0be7b5e4cae5cdb2f4d988b/module/src/sepolicy.rule)
+and [NeoZygisk rules](https://github.com/JingMatrix/NeoZygisk/blob/cc0bbba7c2e0215b0f3fe1fb27e2ee88ade9e688/module/src/sepolicy.rule)
+still include `system_server` execmem. NeoZygisk's optional path remapping
+creates anonymous copies, which would change the shape of this detector's evidence
+without establishing ownership of the existing two regions.
+
+Run the same capture after each reboot and after opening Duck and exercising
+the probes so that its helpers are live:
+
+```sh
+su -c 'sh /data/adb/modules/zygisk-hide/diagnose.sh --package com.eltavine.duckdetector'
+```
+
+1. Capture with Hide disabled, then enabled with its default local backend.
+2. Enable **Use loader unmount for selected processes**, reboot, and repeat.
+   Keep the provider, its memory mode, Vector, HMA and the target lists fixed.
+3. Compare per-process mount marker counts, anonymous RX signatures and
+   loader/Hunter/Duck results. A debug build logs which backend ran. The
+   message “Loader unmount requested” records a request, so the namespace
+   snapshot is the verification.
+4. If testing the loader separately, Zygisk Next
+   [v1.5.1 introduced the zygote blacklist](https://github.com/LSPosed/ZygiskNext/releases/tag/v1.5.1).
+   Only consider a separate A/B if the installed loader identifies a specific
+   detector zygote in that UI. Shared zygotes affect unrelated apps. Record the
+   original setting, reboot for each comparison, and restore it if helpers or
+   dependent features fail. A zygote exclusion may still leave inherited
+   mappings from its parent and global SELinux policy remains loaded.
+5. For the policy comparison, disable Vector separately and reboot before
+   rechecking Xposed rules. The hostsredirect netd rule has its own separate
+   comparison. Changes to a loaded loader policy require testing at the
+   provider level.
+
+The app-zygote matcher strips the AOSP
+[`_zygote` suffix](https://github.com/aosp-mirror/platform_frameworks_base/blob/main/core/java/android/os/AppZygote.java)
+only when the loader identifies the specialization as a child zygote. Scope
+that reaches an isolated helper depends on the callbacks the loader actually
+delivers. The package diagnostic also supports a numeric PID for custom names.

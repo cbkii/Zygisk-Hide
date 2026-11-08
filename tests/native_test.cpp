@@ -11,6 +11,11 @@ int main() {
     assert(Config::matches(t, "com.google.android.gms:unstable", ""));
     assert(!Config::matches(t, "com.google.android.gms.fake:worker", ""));
     assert(!Config::matches(t, "com.example", ""));
+    assert(Config::matches(t, "com.google.android.gms_zygote", "", true));
+    assert(!Config::matches(t, "com.google.android.gms_zygote", "", false));
+    assert(!Config::matches(t, "com.google.android.gms.fake_zygote", "", true));
+    assert(Config::queryCleanup(-1, "", "", Config::MANAGER_SELECTED) == Config::Cleanup::Local);
+    assert(Config::queryCleanup(-1, "", "", 0) == Config::Cleanup::None);
     assert(!Config::matches(t, "invalid/name", "com.google.android.gms"));
     for (const auto *bad : {"", "[]", "{\"a\":trueX}", "{\"a\":true,}",
         "{\"a\":true,\"a\":false}", "{\"a\":1}", "{\"a\":{}}", "{}garbage",

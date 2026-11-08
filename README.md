@@ -34,7 +34,7 @@ This development build targets Android 14+ and Magisk 26+ (including Alpha's
    Zygisk **off**. With Magisk's own provider, enable built-in Zygisk instead.
 4. Full denylist enforcement/exclusion can prevent this and PIF from loading.
    With Zygisk Next and PIF, use a configuration that still permits injection
-   (for the qualified target, `Unmount Only`), then verify actual module loading.
+   (for the Pixel qualification target, `Unmount Only`), then verify actual module loading.
 5. Add target packages in WebUI or the manager denylist. The two lists are
    additive; switching a WebUI toggle off does not override the manager list.
 6. Restart target apps. Reboot for an isolated-service/app-zygote comparison.
@@ -60,6 +60,23 @@ Default operation leaves global properties alone to avoid competing with PIF and
 TEE modules. For legacy upstream boot-property scripts only, explicitly create
 `/data/adb/zygisk-hide/legacy-props` and reboot. Remove that marker and reboot to
 stop those scripts. This does not change hardware attestation or lock a bootloader.
+
+## Loader unmount mode
+
+Enable **Use loader unmount for selected processes** in WebUI to request
+`FORCE_DENYLIST_UNMOUNT` through Zygisk API v4. This skips Hide's own temporary
+mount hooks and namespace companion work. Selection still comes from WebUI or
+the manager list. It uses one bounded companion query, then requests unloading
+at the end of specialization.
+
+The default is Hide's existing local cleanup. The loader option returns no
+success status. Verify that your provider honours it and that the target's
+namespace is clean. Reopen the app to test changes, and reboot to recreate
+its app zygote and isolated children.
+
+The packaged diagnostic accepts a numeric PID or `--package PACKAGE`. Package
+mode reports the main process, conventional helpers and the app zygote. Compare
+mapping categories and region sizes across runs, since addresses change with ASLR.
 
 ## Detector and Integrity limitations
 

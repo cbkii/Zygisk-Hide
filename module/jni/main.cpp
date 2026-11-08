@@ -78,14 +78,19 @@ public:
         if ((flags & zygisk::StateFlag::PROCESS_GRANTED_ROOT) || !Utils::isUserAppUID(args->uid)) return;
         std::string process = Utils::jstringToUtf8(env, args->nice_name);
         std::string package = Runtime::packageFromDataDir(Utils::jstringToUtf8(env, args->app_data_dir), args->uid);
-        bool selected = (flags & zygisk::StateFlag::PROCESS_ON_DENYLIST) != 0;
-        // Manager selection needs no extra IPC/config read.
-        if (!selected) {
-            int fd = api->connectCompanion();
-            if (fd >= 0) { selected = Config::queryIsPackageHidden(fd, process, package); close(fd); }
+        uint8_t selectionFlags = 0;
+        if (flags & zygisk::StateFlag::PROCESS_ON_DENYLIST) selectionFlags |= Config::MANAGER_SELECTED;
+        if (args->is_child_zygote && *args->is_child_zygote) selectionFlags |= Config::CHILD_ZYGOTE;
+        int queryFd = api->connectCompanion();
+        auto cleanup = Config::queryCleanup(queryFd, process, package, selectionFlags);
+        if (queryFd >= 0) close(queryFd);
+        if (cleanup == Config::Cleanup::None) return;
+        if (cleanup == Config::Cleanup::Loader) {
+            LOGD("Loader unmount requested for process=%s uid=%d", process.c_str(), args->uid);
+            api->setOption(zygisk::Option::FORCE_DENYLIST_UNMOUNT);
+            return;
         }
-        if (!selected) return;
-        LOGD("Selected process=%s package=%s uid=%d", process.c_str(), package.c_str(), args->uid);
+        LOGD("Local cleanup selected for process=%s package=%s uid=%d", process.c_str(), package.c_str(), args->uid);
         companionFd = api->connectCompanion();
         if (companionFd >= 0 && !api->exemptFd(companionFd)) closeCompanion();
 
@@ -133,10 +138,13 @@ void zygisk_companion_handler(int fd) {
     auto until = Runtime::deadline();
     uint8_t tag = 0;
     if (!Runtime::readExact(fd, &tag, sizeof(tag), until)) return;
-    if (tag == static_cast<uint8_t>(Config::Request::CONFIG_QUERY)) {
+    if (tag == static_cast<uint8_t>(Config::Request::CLEANUP_QUERY)) {
+        uint8_t flags = 0;
         std::string process, package;
-        if (!Config::readString(fd, process, until) || !Config::readString(fd, package, until)) return;
-        uint8_t result = Config::isPackageHidden(process, package) ? 1 : 0;
+        if (!Runtime::readExact(fd, &flags, sizeof(flags), until) ||
+            (flags & ~(Config::MANAGER_SELECTED | Config::CHILD_ZYGOTE)) ||
+            !Config::readString(fd, process, until) || !Config::readString(fd, package, until)) return;
+        uint8_t result = static_cast<uint8_t>(Config::selectCleanup(process, package, flags));
         Runtime::writeExact(fd, &result, sizeof(result), until);
     } else if (tag == static_cast<uint8_t>(Config::Request::SWITCH_NS)) {
         int ns = Runtime::receiveFd(fd, until);

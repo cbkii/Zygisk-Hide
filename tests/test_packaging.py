@@ -10,7 +10,7 @@ for arg in sys.argv[1:]:
         names = set(archive.namelist())
         assert {p.removeprefix('zygisk/') for p in names if p.startswith('zygisk/') and p.endswith('.so')} == expected
         assert not any(p.endswith('sepolicy.rule') for p in names)
-        assert {'customize.sh', 'diagnose.sh', 'module.prop', 'webroot/index.html'} <= names
+        assert {'customize.sh', 'diagnose.sh', 'diagnose-maps.awk', 'module.prop', 'webroot/index.html'} <= names
         assert b'id=zygisk-hide\n' in archive.read('module.prop')
         assert b'${moduleId}' not in archive.read('module.prop')
         for name in expected:

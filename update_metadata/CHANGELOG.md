@@ -28,3 +28,11 @@
 - Fix repeated/recursive finalization and allocation-failure handling during module unload.
 - Disable the alpha update feed pending a qualified release.
 - Device qualification and Google verdicts remain unverified.
+
+## v3.2.0-alpha2 (development)
+
+- Optional provider unmount through the public Zygisk API, avoiding Hide's own
+  mount hooks in that mode.
+- Match AOSP app-zygote names when the loader identifies the child zygote.
+- Compare mapping signatures, mount markers and identities across an app's
+  process family.

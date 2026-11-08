@@ -199,6 +199,15 @@
   </label>
 </div>
 
+<div class="toggle-row">
+  <span>Use loader unmount for selected processes</span>
+  <label class="switch">
+    <input type="checkbox" id="loaderUnmountToggle" aria-label="Use loader unmount" disabled>
+    <span class="slider"></span>
+  </label>
+</div>
+<p style="margin:12px 16px;color:var(--sub);font-size:13px">This experimental mode asks the active loader to clean mounts and skips Hide’s own mount hooks. Verify the resulting mounts on your loader. The setting applies on the next process launch.</p>
+
 <div class="debug-section">
   <button id="debugToggleBtn" class="debug-btn">Show raw APatch package_config &#9662;</button>
   <pre id="debugOutput" class="debug-output" style="display:none;"></pre>
@@ -261,6 +270,8 @@ function toast(msg) {
 }
 
 const CONFIG_PATH = "/data/adb/zygisk-hide/config.json";
+const LOADER_UNMOUNT_PATH = "/data/adb/zygisk-hide/loader-unmount";
+const loaderUnmountToggle = document.getElementById("loaderUnmountToggle");
 
 const state = {
   packages: [],       // [{pkg, uid}]
@@ -417,13 +428,44 @@ function updateStatus() {
   const poolLabel = state.showSystemApps
     ? `${state.allPkgs.length} apps (incl. system)`
     : `${state.userPkgs.length} user apps`;
-  statusEl.textContent = `${poolLabel} · ${hiddenCount} currently hidden`;
+  statusEl.textContent = `${poolLabel} · ${hiddenCount} selected`;
 }
+
+async function loadLoaderUnmount() {
+  const result = await ksuExec(`if [ -f '${LOADER_UNMOUNT_PATH}' ] && [ ! -L '${LOADER_UNMOUNT_PATH}' ]; then echo enabled; else echo disabled; fi`);
+  if (result.code !== 0) throw new Error("Cannot read loader unmount setting");
+  loaderUnmountToggle.checked = result.stdout.trim() === "enabled";
+}
+
+loaderUnmountToggle.addEventListener("change", async () => {
+  const requested = loaderUnmountToggle.checked;
+  loaderUnmountToggle.disabled = true;
+  try {
+    const action = requested ? `umask 077 && touch '${LOADER_UNMOUNT_PATH}'` : `rm -f '${LOADER_UNMOUNT_PATH}'`;
+    const result = await ksuExec(`[ -d /data/adb/zygisk-hide ] && [ ! -L /data/adb/zygisk-hide ] &&
+      [ ! -L '${LOADER_UNMOUNT_PATH}' ] && { [ ! -e '${LOADER_UNMOUNT_PATH}' ] || [ -f '${LOADER_UNMOUNT_PATH}' ]; } &&
+      ${action}`);
+    if (result.code !== 0) throw new Error("Cannot save loader unmount setting");
+    await loadLoaderUnmount();
+    toast("Saved. Restart the target app or reboot for app zygotes.");
+  } catch (error) {
+    try {
+      await loadLoaderUnmount();
+    } catch {
+      toast("Reload the WebUI to confirm the loader unmount setting.");
+      return;
+    }
+    toast(error.message);
+  }
+  loaderUnmountToggle.disabled = false;
+});
 
 async function init() {
   statusEl.textContent = "Loading installed apps and config…";
+  loaderUnmountToggle.disabled = true;
   try {
-    await Promise.all([loadPackages(), loadConfig()]);
+    await Promise.all([loadPackages(), loadConfig(), loadLoaderUnmount()]);
+    loaderUnmountToggle.disabled = false;
     updateStatus();
     render();
   } catch (e) {

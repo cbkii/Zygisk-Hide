@@ -46,6 +46,27 @@ int main() {
     api = {}; args.uid = 1000;
     module.preAppSpecialize(&args); module.postAppSpecialize(&args);
     assert(api.commits == 0 && api.unloads == 1);
+    for (unsigned managerFlags : {0u, unsigned(zygisk::PROCESS_ON_DENYLIST)}) {
+        reset();
+        api = {};
+        api.flags = managerFlags;
+        int sockets[2];
+        assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+        api.nextCompanionFd = sockets[0];
+        uint8_t reply = static_cast<uint8_t>(Config::Cleanup::Loader);
+        assert(write(sockets[1], &reply, 1) == 1);
+        bool child = true;
+        args = {10123, "com.example_zygote", nullptr, &child};
+        module.preAppSpecialize(&args);
+        assert(api.unmountRequests == 1 && api.companionConnections == 1);
+        uint8_t request[2]{};
+        assert(Runtime::readExact(sockets[1], request, sizeof(request), Runtime::deadline()));
+        assert(request[0] == static_cast<uint8_t>(Config::Request::CLEANUP_QUERY));
+        assert(request[1] == (Config::CHILD_ZYGOTE | (managerFlags ? Config::MANAGER_SELECTED : 0)));
+        close(sockets[1]);
+        module.postAppSpecialize(&args);
+        assert(api.commits == 0 && api.unloads == 1 && companionFd == -1);
+    }
     reset();
     old_unshare = originalUnshare;
     pending = true;
