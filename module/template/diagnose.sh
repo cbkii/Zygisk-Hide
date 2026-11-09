@@ -55,8 +55,9 @@ if [ -n "$scope_only" ]; then
         exit 1
     fi
     stat -c 'inline_config_mode=%a' "$config"
-    echo 'Exact v1.0 scope from the saved config. Runtime remap activity requires separate evidence.'
-    awk -v "targets=$*" -f "$script_dir/diagnose-inline.awk" "$config"
+    version_code=$(awk -F= '/^versionCode=[0-9]+$/ {print $2; exit}' "$inline/module.prop")
+    echo 'Exact process scope from the saved config. Runtime remap activity requires separate evidence.'
+    awk -v "version_code=${version_code:-1}" -v "targets=$*" -f "$script_dir/diagnose-inline.awk" "$config"
     exit $?
 fi
 

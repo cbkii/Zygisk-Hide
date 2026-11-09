@@ -86,7 +86,8 @@ The packaged diagnostic accepts a numeric PID or `--package PACKAGE`. Package
 mode reports the main process, conventional helpers and the app zygote. Compare
 mapping categories and region sizes across runs, since addresses change with ASLR.
 Use `--inline-scope [PROCESS ...]` to see which exact processes Inline Hook
-Invalidate is configured to target. The scope report reads saved configuration.
+Invalidate is configured to target and which remap mode each uses. The scope
+report reads saved configuration.
 Use a rebooted comparison to verify actual process behaviour.
 
 ## Detector and Integrity limitations

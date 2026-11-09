@@ -1,5 +1,6 @@
 """Validate packaging contracts, optionally against built module ZIPs."""
 import pathlib
+import subprocess
 import sys
 import zipfile
 
@@ -21,3 +22,35 @@ for name in ('post-fs-data.sh', 'service.sh'):
     text = (root / 'module/template' / name).read_text()
     assert text.index('legacy-props') < text.index('resetprop_if_diff')
     assert '/sys/fs/selinux/policy' not in text
+
+inline_scope = root / 'module/template/diagnose-inline.awk'
+targets = 'targets=example.app example.app:helper example.other'
+legacy = subprocess.run(
+    ['awk', '-v', 'version_code=1', '-v', targets, '-f', inline_scope],
+    input='1:libart.so:pread\r\nexample.app:helper\r\n', text=True,
+    capture_output=True, check=True,
+).stdout.splitlines()
+assert legacy == [
+    'inline_config=enabled library=libart.so method=pread',
+    'example.app listed=no configured_remap=no method=none',
+    'example.app:helper listed=yes configured_remap=yes method=pread',
+    'example.other listed=no configured_remap=no method=none',
+]
+modern_args = ['awk', '-v', 'version_code=5', '-v', targets, '-f', inline_scope]
+config = (
+    '1:libart.so:mmap-once\nexample.app\nexample.app:helper\n'
+    '@mode example.app:helper mmap\n@mode example.other pread\n'
+)
+modern = subprocess.run(
+    modern_args, input=config, text=True, capture_output=True, check=True,
+).stdout.splitlines()
+assert modern == [
+    'inline_config=enabled library=libart.so method=mmap-once',
+    'example.app listed=yes configured_remap=yes method=mmap-once',
+    'example.app:helper listed=yes configured_remap=yes method=mmap',
+    'example.other listed=no configured_remap=no method=none',
+]
+invalid = subprocess.run(
+    modern_args, input=config + '@mode example.other mmap\n', text=True, capture_output=True,
+)
+assert invalid.returncode == 1 and invalid.stdout == 'inline_config=invalid\n'
