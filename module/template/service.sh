@@ -1,4 +1,6 @@
 MODPATH="${0%/*}"
+# Default: leave PIF/TEE property ownership and SELinux permissions alone.
+[ -f /data/adb/zygisk-hide/legacy-props ] || exit 0
 . $MODPATH/common_func.sh
 
 # Conditional sensitive properties
@@ -14,17 +16,14 @@ resetprop_if_diff ro.boot.selinux enforcing
 if ! $SKIPDELPROP; then
     delprop_if_exist ro.build.selinux
 fi
-# use toybox to protect stat access time reading
-if [ "$(toybox cat /sys/fs/selinux/enforce)" = "0" ]; then
-    chmod 640 /sys/fs/selinux/enforce
-    chmod 440 /sys/fs/selinux/policy
-fi
-
 # Conditional late sensitive properties
 
 # must be set after boot_completed for various OEMs
 {
+count=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
+    [ "$count" -lt 120 ] || exit 0
+    count=$((count + 1))
     sleep 1
 done
 

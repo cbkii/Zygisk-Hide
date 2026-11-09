@@ -9,14 +9,13 @@ val moduleName: String by rootProject.extra
 val verCode: Int by rootProject.extra
 val commitHash: String by rootProject.extra
 val verName: String by rootProject.extra
-val abiList: List<String> by rootProject.extra
 
 android {
     namespace = "com.example.library"
     compileSdkVersion = "android-34"
     ndkVersion = "28.0.13004108"
     defaultConfig {
-        minSdk = 21
+        minSdk = 34
         externalNativeBuild {
             ndkBuild {
                 arguments("-j${Runtime.getRuntime().availableProcessors()}")

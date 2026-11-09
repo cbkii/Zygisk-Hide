@@ -1,10 +1,8 @@
 #include <unistd.h>
 #include <sched.h>
 #include <sys/mount.h>
-
+#include <fcntl.h>
 #include <cstdint>
-#include <functional>
-
 #include "zygisk.hpp"
 #include "logging.hpp"
 #include "utils.hpp"
@@ -16,241 +14,151 @@ using zygisk::Api;
 using zygisk::AppSpecializeArgs;
 using zygisk::ServerSpecializeArgs;
 
-static std::function<void()> callbackFunction = []() {};
+// Per-child state. No heap-allocated, self-destroying callback, persistent
+// syscall interception, executable allocation or additional SELinux rule.
+static int (*old_unshare)(int) = nullptr;
+static int (*old_setresuid)(uid_t, uid_t, uid_t) = nullptr;
+static bool unshareHooked = false, uidHooked = false, pending = false;
+static bool privateNamespace = false;
+static int companionFd = -1;
 
-/*
- * [What's the purpose of this hook?]
- * Hooking unshare is necessary to stop Zygote from calling unshare a second time,
- * because that breaks the FDs. We handle this by reopening FDs,
- * allowing us to call unshare twice safely in our callback.
- *
- * [Doesn't Android already call unshare?]
- * Android's use of unshare changes with each major version, so we always call unshare
- * in preAppSpecialize.
- * > Android 5: Sometimes calls unshare
- * > Android 6: Always calls unshare
- * > Android 7-11: Sometimes calls unshare
- * > Android 12-14: Always calls unshare
- */
-DCL_HOOK_FUNC(static int, unshare, int flags)
-{
-    callbackFunction();
-    // Do not allow CLONE_NEWNS.
-    flags &= ~(CLONE_NEWNS);
-    if (!flags)
-    {
-        // If CLONE_NEWNS was the only flag, skip the call.
-        errno = 0;
-        return 0;
+static void closeCompanion() {
+    if (companionFd >= 0) close(companionFd);
+    companionFd = -1;
+}
+
+static void cleanPrivateNamespace() {
+    if (mount(nullptr, "/", nullptr, MS_SLAVE | MS_REC, nullptr) != 0) {
+        LOGW("Unable to isolate mount propagation: %s", strerror(errno));
+        return;
     }
-    return old_unshare(flags);
+    pending = false;
+    uint8_t result = 0;
+    auto until = Runtime::deadline();
+    uint8_t tag = static_cast<uint8_t>(Config::Request::SWITCH_NS);
+    // Pass the namespace itself rather than trusting a caller-supplied PID.
+    int ns = open("/proc/self/ns/mnt", O_RDONLY | O_CLOEXEC);
+    bool ok = companionFd >= 0 && ns >= 0 &&
+              Runtime::writeExact(companionFd, &tag, sizeof(tag), until) &&
+              Runtime::sendFd(companionFd, ns, until) &&
+              Runtime::readExact(companionFd, &result, sizeof(result), until) && result == 1;
+    if (ns >= 0) close(ns);
+    closeCompanion();
+    if (!ok) {
+        LOGW("Companion cleanup failed or timed out; attempting local unmount only");
+        if (!doUnmount()) LOGW("Local mount cleanup incomplete");
+    }
 }
 
-/*
- * [What's the purpose of this hook?]
- * Hooking setresuid ensures we can execute code while we still have CAP_SYS_ADMIN,
- * which is necessary for some operations.
- * This hook is necessary because setresuid is called unconditionally,
- * and we need to perform actions before this syscall.
- */
-DCL_HOOK_FUNC(static int, setresuid, uid_t ruid, uid_t euid, uid_t suid)
-{
-    callbackFunction();
-    return old_setresuid(ruid, euid, suid);
+static int new_unshare(int flags) {
+    auto unshare = old_unshare ? old_unshare : ::unshare;
+    if (!pending || !(flags & CLONE_NEWNS)) return unshare(flags);
+
+    FDReopener::ScopedRegularReopener reopener;
+    int result = unshare(flags);
+    if (result != 0) return result;
+    privateNamespace = true;
+    cleanPrivateNamespace();
+    return result;
+}
+static int new_setresuid(uid_t real, uid_t effective, uid_t saved) {
+    if (pending) {
+        FDReopener::ScopedRegularReopener reopener;
+        if (!privateNamespace) privateNamespace = old_unshare && old_unshare(CLONE_NEWNS) == 0;
+        if (privateNamespace) cleanPrivateNamespace();
+        else LOGW("Unable to create private mount namespace: %s", strerror(errno));
+        pending = false;
+        closeCompanion();
+    }
+    return old_setresuid ? old_setresuid(real, effective, saved) : ::setresuid(real, effective, saved);
 }
 
-/*
- * [Why is this function needed?]
- * This function unconditionally calls unshare to create a new mount namespace.
- * It ensures that the new namespace is isolated but still allows propagation of mount
- * events from the parent namespace by setting the root as MS_SLAVE.
- */
-static bool new_mount_ns()
-{
-    /*
-     * Unconditional unshare.
-     */
-    ASSERT_DO(new_mount_ns, old_unshare(CLONE_NEWNS) != -1, return false);
-
-    /*
-     * Mount the app mount namespace's root as MS_SLAVE, so every mount/umount from
-     * Zygote shared pre-specialization namespace is propagated to this one.
-     */
-    ASSERT_DO(new_mount_ns, mount("rootfs", "/", NULL, (MS_SLAVE | MS_REC), NULL) != -1, return false);
-    return true;
-}
-
-class ZygiskModule : public zygisk::ModuleBase
-{
+class ZygiskModule : public zygisk::ModuleBase {
 public:
-    void onLoad(Api *api, JNIEnv *env) override
-    {
-        this->api = api;
-        this->env = env;
-    }
-
-    void preAppSpecialize(AppSpecializeArgs *args) override
-    {
-        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
-
+    void onLoad(Api *api, JNIEnv *env) override { this->api = api; this->env = env; }
+    void preAppSpecialize(AppSpecializeArgs *args) override {
         uint32_t flags = api->getFlags();
-        bool isRoot = (flags & zygisk::StateFlag::PROCESS_GRANTED_ROOT) != 0;
-        bool isOnDenylist = (flags & zygisk::StateFlag::PROCESS_ON_DENYLIST) != 0;
-        bool isChildZygote = args->is_child_zygote != NULL && *args->is_child_zygote;
-
-        // Cheap checks first, same as before: rooted processes and non-user
-        // apps are never candidates for hiding regardless of any list.
-        if (isRoot || !Utils::isUserAppUID(args->uid))
-        {
-            LOGD("Skipping ppid=%d uid=%d isChildZygote=%d", getppid(), args->uid, isChildZygote);
+        if ((flags & zygisk::StateFlag::PROCESS_GRANTED_ROOT) || !Utils::isUserAppUID(args->uid)) return;
+        std::string process = Utils::jstringToUtf8(env, args->nice_name);
+        std::string package = Runtime::packageFromDataDir(Utils::jstringToUtf8(env, args->app_data_dir), args->uid);
+        uint8_t selectionFlags = 0;
+        if (flags & zygisk::StateFlag::PROCESS_ON_DENYLIST) selectionFlags |= Config::MANAGER_SELECTED;
+        if (args->is_child_zygote && *args->is_child_zygote) selectionFlags |= Config::CHILD_ZYGOTE;
+        int queryFd = api->connectCompanion();
+        auto cleanup = Config::queryCleanup(queryFd, process, package, selectionFlags);
+        if (queryFd >= 0) close(queryFd);
+        if (cleanup == Config::Cleanup::None) return;
+        if (cleanup == Config::Cleanup::Loader) {
+            LOGD("Loader unmount requested for process=%s uid=%d", process.c_str(), args->uid);
+            api->setOption(zygisk::Option::FORCE_DENYLIST_UNMOUNT);
             return;
         }
+        LOGD("Local cleanup selected for process=%s package=%s uid=%d", process.c_str(), package.c_str(), args->uid);
+        companionFd = api->connectCompanion();
+        if (companionFd >= 0 && !api->exemptFd(companionFd)) closeCompanion();
 
-        std::string niceName = Utils::jstringToUtf8(env, args->nice_name);
-
-        // The manager's own denylist ("Exclude Modifications"/"Unmount
-        // Modules") and the module's WebUI per-app list are two
-        // independent, additive sources for the same decision: being
-        // listed in EITHER one is enough to hide this app.
-        bool isInWebUiList = false;
-        {
-            int configFd = api->connectCompanion();
-            if (configFd != -1)
-            {
-                isInWebUiList = Config::queryIsPackageHidden(configFd, niceName);
-                close(configFd);
-            }
-            else
-            {
-                LOGW("preAppSpecialize: failed to connect companion for WebUI config query, pkg=%s", niceName.c_str());
-            }
-        }
-
-        bool shouldHide = isOnDenylist || isInWebUiList;
-        if (!shouldHide)
-        {
-            LOGD("Skipping ppid=%d uid=%d isChildZygote=%d pkg=%s (not denylisted, not in WebUI list)",
-                 getppid(), args->uid, isChildZygote, niceName.c_str());
+        // Set tracking before committing: a failed commit can still have changed
+        // a relocation. postAppSpecialize always attempts restoration.
+        unshareHooked = true;
+        if (!hook("unshare", new_unshare, &old_unshare) || !old_unshare) {
+            LOGW("unshare import unavailable; runtime cleanup skipped");
+            closeCompanion();
             return;
         }
-        LOGD("Processing ppid=%d uid=%d isChildZygote=%d pkg=%s (denylist=%d webui=%d)",
-             getppid(), args->uid, isChildZygote, niceName.c_str(), isOnDenylist, isInWebUiList);
-
-        ASSERT_DO(preAppSpecialize, hookPLTByName("libandroid_runtime.so", "unshare", new_unshare, &old_unshare), return);
-        ASSERT_DO(preAppSpecialize, hookPLTByName("libandroid_runtime.so", "setresuid", new_setresuid, &old_setresuid), return);
-
-        int companionFd = -1;
-        ASSERT_LOG(preAppSpecialize, (companionFd = api->connectCompanion()) != -1);
-        ASSERT_LOG(preAppSpecialize, companionFd != -1 && api->exemptFd(companionFd));
-
-        callbackFunction = [fd = companionFd]()
-        {
-            // Call only once per process.
-            callbackFunction = []() {};
-            FDReopener::ScopedRegularReopener srr;
-            
-            if (!new_mount_ns())
-                return;
-
-            bool result = false;
-            if (fd != -1)
-            {
-                do
-                {
-                    uint8_t tag = static_cast<uint8_t>(Config::Request::SWITCH_NS);
-                    ASSERT_DO(callbackFunction, write(fd, &tag, sizeof(tag)) == sizeof(tag), break);
-                    pid_t pid = getpid();
-                    ASSERT_DO(callbackFunction, write(fd, &pid, sizeof(pid)) == sizeof(pid), break);
-                    ASSERT_DO(callbackFunction, read(fd, &result, sizeof(result)) == sizeof(result), break);
-                } while (false);
-                close(fd);
-            }
-
-            if (result)
-                LOGD("Invoking the companion was successful.");
-            else
-            {
-                LOGW("Invoking the companion failed. Functionality will be limited in Zygote context!");
-                doUnmount();
-            }
-
-            doHideZygisk();
-        };
+        uidHooked = true;
+        if (!hook("setresuid", new_setresuid, &old_setresuid) || !old_setresuid) {
+            LOGW("setresuid import unavailable; runtime cleanup skipped");
+            closeCompanion();
+            return;
+        }
+        pending = true;
     }
-
-    void preServerSpecialize(ServerSpecializeArgs *args) override
-    {
+    void preServerSpecialize(ServerSpecializeArgs *) override {
         api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
-
-    void postAppSpecialize(const AppSpecializeArgs *args) override
-    {
-        if (old_unshare != nullptr)
-            ASSERT_LOG(postAppSpecialize, hookPLTByName("libandroid_runtime.so", "unshare", old_unshare));
-        if (old_setresuid != nullptr)
-            ASSERT_LOG(postAppSpecialize, hookPLTByName("libandroid_runtime.so", "setresuid", old_setresuid));
+    void postAppSpecialize(const AppSpecializeArgs *) override {
+        pending = false;
+        closeCompanion();
+        bool restored = true;
+        if (uidHooked) restored = old_setresuid && hook("setresuid", old_setresuid) && restored;
+        if (unshareHooked) restored = old_unshare && hook("unshare", old_unshare) && restored;
+        if (!restored) LOGE("Hook restoration failed; retaining module library to avoid dangling code pointers");
+        // Zygisk API v4 prohibits requesting unload after hooking functions.
+        if (!uidHooked && !unshareHooked) api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
-
-    template <typename T>
-    bool hookPLTByName(const std::string &libName, const std::string &symbolName, T *hookFunction, T **originalFunction = nullptr)
-    {
-        return Utils::hookPLTByName(api, libName, symbolName, (void *)hookFunction, (void **)originalFunction) && api->pltHookCommit();
-    }
-
 private:
-    Api *api;
-    JNIEnv *env;
+    template <typename T> bool hook(const char *symbol, T *replacement, T **original = nullptr) {
+        return Utils::hookPLTByName(api, "libandroid_runtime.so", symbol,
+                                   reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(original)) &&
+               api->pltHookCommit();
+    }
+    Api *api = nullptr;
+    JNIEnv *env = nullptr;
 };
 
-void zygisk_companion_handler(int fd)
-{
-    uint8_t reqType = 0;
-    ASSERT_DO(zygisk_companion_handler, read(fd, &reqType, sizeof(reqType)) == sizeof(reqType), return);
-
-    if (reqType == static_cast<uint8_t>(Config::Request::CONFIG_QUERY))
-    {
-        // Answer a WebUI per-app config lookup. This is the only place in
-        // the whole module that reads config.json -- always in the
-        // companion's unrestricted root context, never from Zygote/app
-        // process space.
-        uint16_t len = 0;
-        ASSERT_DO(zygisk_companion_handler, read(fd, &len, sizeof(len)) == sizeof(len), return);
-
-        std::string pkg;
-        if (len > 0)
-        {
-            pkg.resize(len);
-            ASSERT_DO(zygisk_companion_handler, read(fd, pkg.data(), len) == (ssize_t)len, return);
-        }
-
-        uint8_t result = Config::isPackageHidden(pkg) ? 1 : 0;
-        ASSERT_LOG(zygisk_companion_handler, write(fd, &result, sizeof(result)) == sizeof(result));
-        return;
-    }
-
-    if (reqType == static_cast<uint8_t>(Config::Request::SWITCH_NS))
-    {
-        pid_t pid;
-        ASSERT_DO(zygisk_companion_handler, read(fd, &pid, sizeof(pid)) == sizeof(pid), return);
-        LOGD("zygisk_companion_handler processing namespace of pid=%d", pid);
-
-        // setns requires the caller to be single-threaded
-        bool result = WIFEXITED(Utils::forkAndInvoke(
-            [pid]()
-            {
-                ASSERT_DO(zygisk_companion_handler, Utils::switchMountNS(pid), return 1);
-                doUnmount();
-                doRemount();
-                doMrProp();
-                return 0;
-            }));
-
-        ASSERT_LOG(zygisk_companion_handler, write(fd, &result, sizeof(result)) == sizeof(result));
-        return;
-    }
-
-    LOGW("zygisk_companion_handler: unknown request type %d", reqType);
+void zygisk_companion_handler(int fd) {
+    auto until = Runtime::deadline();
+    uint8_t tag = 0;
+    if (!Runtime::readExact(fd, &tag, sizeof(tag), until)) return;
+    if (tag == static_cast<uint8_t>(Config::Request::CLEANUP_QUERY)) {
+        uint8_t flags = 0;
+        std::string process, package;
+        if (!Runtime::readExact(fd, &flags, sizeof(flags), until) ||
+            (flags & ~(Config::MANAGER_SELECTED | Config::CHILD_ZYGOTE)) ||
+            !Config::readString(fd, process, until) || !Config::readString(fd, package, until)) return;
+        uint8_t result = static_cast<uint8_t>(Config::selectCleanup(process, package, flags));
+        Runtime::writeExact(fd, &result, sizeof(result), until);
+    } else if (tag == static_cast<uint8_t>(Config::Request::SWITCH_NS)) {
+        int ns = Runtime::receiveFd(fd, until);
+        if (ns < 0) return;
+        int status = Utils::forkAndInvoke([ns]() {
+            if (setns(ns, CLONE_NEWNS) != 0) return 1;
+            return doUnmount() ? 0 : 2;
+        });
+        close(ns);
+        uint8_t result = Runtime::childSucceeded(status) ? 1 : 0;
+        Runtime::writeExact(fd, &result, sizeof(result), until);
+    } else LOGW("Unknown companion request: %u", tag);
 }
-
 REGISTER_ZYGISK_MODULE(ZygiskModule)
 REGISTER_ZYGISK_COMPANION(zygisk_companion_handler)

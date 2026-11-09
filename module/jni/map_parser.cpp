@@ -52,7 +52,7 @@ const std::vector<map_entry> &Parsers::parseSelfMaps(bool cached)
 
         if (iss.fail())
         {
-            LOGE("parseSelfMaps failed to parse line: %s", line.c_str());
+            LOGE("parseSelfMaps failed to parse a line");
             continue;
         }
 

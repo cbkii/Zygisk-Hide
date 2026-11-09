@@ -1,48 +1,24 @@
 #pragma once
-#include <string>
 #include <cstdint>
-
-/*
- * Support for the module's WebUI, which lets the user toggle root/Zygisk
- * hiding on a per-app basis independently of the root manager's own
- * denylist ("Exclude Modifications" / "Unmount Modules" toggle).
- *
- * The WebUI (webroot/index.html) writes a flat JSON object mapping
- * package name -> bool at CONFIG_PATH, e.g.:
- *   { "com.example.app": true, "com.other.app": true }
- * Only truthy entries are treated as "hide this app"; the WebUI simply
- * omits an app's key when it's toggled off.
- *
- * This file is read by the Zygisk companion process (root, unrestricted
- * SELinux domain), never directly from within the Zygote/app process,
- * since preAppSpecialize runs in a much more restricted context.
- */
-namespace Config
-{
-    constexpr const char *CONFIG_PATH = "/data/adb/modules/zygisk-hide/config.json";
-
-    // Companion request protocol tags. Sent as the first byte of any
-    // message to zygisk_companion_handler so it can dispatch correctly.
-    enum class Request : uint8_t
-    {
-        SWITCH_NS = 1,
-        CONFIG_QUERY = 2,
-    };
-
-    /*
-     * Server-side: reads CONFIG_PATH fresh (no caching, so WebUI edits
-     * take effect on the very next app launch) and checks whether
-     * packageName is present with a truthy value.
-     * Safe to call from the companion only.
-     */
-    bool isPackageHidden(const std::string &packageName);
-
-    /*
-     * Client-side: sends a CONFIG_QUERY request for packageName over an
-     * already-connected companion fd and blocks for the boolean answer.
-     * Does NOT close companionFd; caller owns its lifetime.
-     * Returns false (i.e. "don't additionally hide") on any I/O error,
-     * so a broken/missing config can never crash or wedge app startup.
-     */
-    bool queryIsPackageHidden(int companionFd, const std::string &packageName);
+#include <map>
+#include <string>
+#include <string_view>
+#include "runtime_support.hpp"
+namespace Config {
+constexpr const char *CONFIG_PATH = "/data/adb/zygisk-hide/config.json";
+constexpr size_t MAX_CONFIG_SIZE = 65536;
+using Targets = std::map<std::string, bool>;
+enum class Request : uint8_t { SWITCH_NS = 1, CLEANUP_QUERY = 3 };
+enum class Cleanup : uint8_t { None, Local, Loader };
+constexpr uint8_t MANAGER_SELECTED = 1;
+constexpr uint8_t CHILD_ZYGOTE = 2;
+// Strict schema: flat object of plain package/process names and JSON booleans.
+// Reject duplicates, escapes, unsupported values and trailing input.
+bool parse(std::string_view json, Targets &targets);
+bool matches(const Targets &targets, const std::string &process, const std::string &package,
+             bool childZygote = false);
+Cleanup selectCleanup(const std::string &process, const std::string &package, uint8_t flags);
+Cleanup queryCleanup(int fd, const std::string &process, const std::string &package, uint8_t flags);
+bool readString(int fd, std::string &value, Runtime::Deadline until);
+bool writeString(int fd, const std::string &value, Runtime::Deadline until);
 }
