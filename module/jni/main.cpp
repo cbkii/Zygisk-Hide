@@ -19,7 +19,7 @@ using zygisk::ServerSpecializeArgs;
 static int (*old_unshare)(int) = nullptr;
 static int (*old_setresuid)(uid_t, uid_t, uid_t) = nullptr;
 static bool unshareHooked = false, uidHooked = false, pending = false;
-static bool namespaceReady = false;
+static bool privateNamespace = false;
 static int companionFd = -1;
 
 static void closeCompanion() {
@@ -27,21 +27,12 @@ static void closeCompanion() {
     companionFd = -1;
 }
 
-static bool runCleanup() {
-    if (!pending) return namespaceReady;
-    pending = false;
-    FDReopener::ScopedRegularReopener reopener;
-    if (!old_unshare || old_unshare(CLONE_NEWNS) != 0) {
-        LOGW("Unable to create private mount namespace: %s", strerror(errno));
-        closeCompanion();
-        return false;
-    }
+static void cleanPrivateNamespace() {
     if (mount(nullptr, "/", nullptr, MS_SLAVE | MS_REC, nullptr) != 0) {
         LOGW("Unable to isolate mount propagation: %s", strerror(errno));
-        closeCompanion();
-        return false;
+        return;
     }
-    namespaceReady = true;
+    pending = false;
     uint8_t result = 0;
     auto until = Runtime::deadline();
     uint8_t tag = static_cast<uint8_t>(Config::Request::SWITCH_NS);
@@ -57,16 +48,28 @@ static bool runCleanup() {
         LOGW("Companion cleanup failed or timed out; attempting local unmount only");
         if (!doUnmount()) LOGW("Local mount cleanup incomplete");
     }
-    return true;
 }
 
 static int new_unshare(int flags) {
-    // Do not consume the one-shot callback on an unrelated namespace request.
-    if ((flags & CLONE_NEWNS) && runCleanup()) flags &= ~CLONE_NEWNS;
-    return flags ? (old_unshare ? old_unshare(flags) : ::unshare(flags)) : 0;
+    auto unshare = old_unshare ? old_unshare : ::unshare;
+    if (!pending || !(flags & CLONE_NEWNS)) return unshare(flags);
+
+    FDReopener::ScopedRegularReopener reopener;
+    int result = unshare(flags);
+    if (result != 0) return result;
+    privateNamespace = true;
+    cleanPrivateNamespace();
+    return result;
 }
 static int new_setresuid(uid_t real, uid_t effective, uid_t saved) {
-    runCleanup();
+    if (pending) {
+        FDReopener::ScopedRegularReopener reopener;
+        if (!privateNamespace) privateNamespace = old_unshare && old_unshare(CLONE_NEWNS) == 0;
+        if (privateNamespace) cleanPrivateNamespace();
+        else LOGW("Unable to create private mount namespace: %s", strerror(errno));
+        pending = false;
+        closeCompanion();
+    }
     return old_setresuid ? old_setresuid(real, effective, saved) : ::setresuid(real, effective, saved);
 }
 

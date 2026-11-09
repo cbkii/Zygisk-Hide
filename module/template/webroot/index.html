@@ -277,6 +277,7 @@ const state = {
   packages: [],       // [{pkg, uid}]
   config: {},         // { "com.example": true, ... }
   dirty: false,
+  saving: false,
   filter: "all",       // "all" | "enabled"
   showSystemApps: false,
   query: ""
@@ -333,8 +334,7 @@ async function loadConfig() {
   }
 }
 
-async function saveConfig() {
-  const json = JSON.stringify(state.config, null, 2);
+async function saveConfig(json) {
   parseTargetConfig(json);
   const b64 = b64encode(json);
   const dir = CONFIG_PATH.substring(0, CONFIG_PATH.lastIndexOf("/"));
@@ -418,7 +418,7 @@ function render() {
       if (cb.checked) state.config[pkg] = true;
       else delete state.config[pkg];
       state.dirty = true;
-      saveBtn.disabled = false;
+      saveBtn.disabled = state.saving;
     });
   });
 }
@@ -534,24 +534,30 @@ reloadBtn.addEventListener("click", () => {
 });
 
 saveBtn.addEventListener("click", async () => {
+  if (state.saving) return;
+  const snapshot = JSON.stringify(state.config, null, 2);
+  state.saving = true;
   saveBtn.disabled = true;
+  reloadBtn.disabled = true;
   saveBtn.textContent = "Saving…";
   try {
-    const ok = await saveConfig();
-    if (ok) {
-      state.dirty = false;
-      toast("Saved. Reboot for isolated/app-zygote processes; otherwise restart the target app.");
+    if (await saveConfig(snapshot)) {
+      state.dirty = snapshot !== JSON.stringify(state.config, null, 2);
+      toast(state.dirty ? "Saved earlier changes. New edits still need saving." :
+        "Saved. Reboot for isolated/app-zygote processes; otherwise restart the target app.");
       updateStatus();
       render();
     } else {
       toast("Save failed — check module folder permissions.");
-      saveBtn.disabled = false;
     }
   } catch (e) {
     toast("Save error: " + e.message);
-    saveBtn.disabled = false;
+  } finally {
+    state.saving = false;
+    saveBtn.disabled = !state.dirty;
+    reloadBtn.disabled = false;
+    saveBtn.textContent = "Save changes";
   }
-  saveBtn.textContent = "Save changes";
 });
 
 init();

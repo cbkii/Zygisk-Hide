@@ -52,9 +52,11 @@ bool Config::matches(const Targets &targets, const std::string &process, const s
         auto it = targets.find(key);
         return it != targets.end() && it->second;
     };
+    const bool packageKnown = Runtime::validName(package);
+    if (packageKnown && enabled(package)) return true;
     if (!Runtime::validName(process, true)) return false;
     if (enabled(process)) return true;
-    if (Runtime::validName(package) && enabled(package)) return true;
+    if (packageKnown) return false;
     // Conventional package:private_process naming, including isolated helpers.
     // Custom names use app_data_dir or the manager's denylist flag.
     constexpr std::string_view suffix = "_zygote";
@@ -120,13 +122,19 @@ Config::Cleanup Config::queryCleanup(int fd, const std::string &process, const s
                                     uint8_t flags) {
     // Preserve the manager's independent selection if the companion cannot reply.
     const auto fallback = flags & MANAGER_SELECTED ? Cleanup::Local : Cleanup::None;
-    if (fd < 0) return fallback;
+    if (fd < 0) {
+        LOGW("Companion connection unavailable; using manager selection only");
+        return fallback;
+    }
     auto until = Runtime::deadline();
     uint8_t tag = static_cast<uint8_t>(Request::CLEANUP_QUERY), result = 0;
     if (!Runtime::writeExact(fd, &tag, sizeof(tag), until) ||
         !Runtime::writeExact(fd, &flags, sizeof(flags), until) ||
         !writeString(fd, process, until) || !writeString(fd, package, until) ||
-        !Runtime::readExact(fd, &result, sizeof(result), until)) return fallback;
+        !Runtime::readExact(fd, &result, sizeof(result), until)) {
+        LOGW("Companion selection query failed; using manager selection only");
+        return fallback;
+    }
     if (result == static_cast<uint8_t>(Cleanup::Loader)) return Cleanup::Loader;
     if (result == static_cast<uint8_t>(Cleanup::Local)) return Cleanup::Local;
     return fallback;

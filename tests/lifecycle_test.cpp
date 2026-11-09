@@ -1,8 +1,23 @@
 // Exercise production callback sequencing with a fake public Zygisk API.
 // This tests lifecycle decisions, not the real loader ABI or SELinux access.
 #include <cassert>
+#include <sys/mount.h>
+
+static int unshareCalls = 0, unshareFlags = 0, unshareResult = 0;
+static int mountCalls = 0, mountResult = 0;
+static int fakeMount(const char *, const char *, const char *, unsigned long, const void *) {
+    ++mountCalls;
+    return mountResult;
+}
+#define mount fakeMount
 #include "../module/jni/main.cpp"
-static int originalUnshare(int) { return 0; }
+#undef mount
+
+static int originalUnshare(int flags) {
+    ++unshareCalls;
+    unshareFlags = flags;
+    return unshareResult;
+}
 static int originalUid(uid_t, uid_t, uid_t) { return 0; }
 std::string Utils::jstringToUtf8(JNIEnv *, jstring s) { return s ? s : ""; }
 int Utils::isUserAppUID(int uid) { return uid >= 10000; }
@@ -16,7 +31,8 @@ FDReopener::ScopedRegularReopener::ScopedRegularReopener() = default;
 FDReopener::ScopedRegularReopener::~ScopedRegularReopener() = default;
 static void reset() {
     old_unshare = nullptr; old_setresuid = nullptr;
-    unshareHooked = uidHooked = pending = namespaceReady = false;
+    unshareHooked = uidHooked = pending = privateNamespace = false;
+    unshareCalls = unshareFlags = unshareResult = mountCalls = mountResult = 0;
     companionFd = -1;
 }
 int main() {
@@ -70,5 +86,35 @@ int main() {
     reset();
     old_unshare = originalUnshare;
     pending = true;
-    assert(new_unshare(CLONE_NEWNET) == 0 && pending); // Unrelated call must not consume cleanup.
+    assert(new_unshare(CLONE_NEWNET) == 0 && pending);
+    assert(unshareCalls == 1 && mountCalls == 0);
+
+    reset();
+    old_unshare = originalUnshare;
+    pending = true;
+    assert(new_unshare(CLONE_NEWNS | CLONE_NEWNET) == 0);
+    assert(unshareCalls == 1 && unshareFlags == (CLONE_NEWNS | CLONE_NEWNET));
+    assert(mountCalls == 1 && !pending);
+    assert(new_unshare(CLONE_NEWNS) == 0); // Also applies if restoration retained the hook.
+    assert(unshareCalls == 2 && mountCalls == 1 && unshareFlags == CLONE_NEWNS);
+
+    reset();
+    old_unshare = originalUnshare;
+    old_setresuid = originalUid;
+    pending = true;
+    mountResult = -1;
+    assert(new_unshare(CLONE_NEWNS) == 0 && pending && privateNamespace);
+    mountResult = 0;
+    assert(new_setresuid(10123, 10123, 10123) == 0);
+    assert(unshareCalls == 1 && mountCalls == 2 && !pending);
+
+    reset();
+    old_unshare = originalUnshare;
+    old_setresuid = originalUid;
+    pending = true;
+    unshareResult = -1;
+    assert(new_unshare(CLONE_NEWNS) == -1 && pending && !privateNamespace);
+    unshareResult = 0;
+    assert(new_setresuid(10123, 10123, 10123) == 0);
+    assert(unshareCalls == 2 && mountCalls == 1 && !pending);
 }

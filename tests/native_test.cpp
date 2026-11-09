@@ -16,7 +16,9 @@ int main() {
     assert(!Config::matches(t, "com.google.android.gms.fake_zygote", "", true));
     assert(Config::queryCleanup(-1, "", "", Config::MANAGER_SELECTED) == Config::Cleanup::Local);
     assert(Config::queryCleanup(-1, "", "", 0) == Config::Cleanup::None);
-    assert(!Config::matches(t, "invalid/name", "com.google.android.gms"));
+    assert(Config::matches(t, "invalid/name", "com.google.android.gms"));
+    assert(!Config::matches(t, "com.google.android.gms:worker", "com.example"));
+    assert(!Config::matches(t, "com.google.android.gms_zygote", "com.example", true));
     for (const auto *bad : {"", "[]", "{\"a\":trueX}", "{\"a\":true,}",
         "{\"a\":true,\"a\":false}", "{\"a\":1}", "{\"a\":{}}", "{}garbage",
         "{\"a\\u002eb\":true}", "{\"a\":false,\"b\":true"}) {
