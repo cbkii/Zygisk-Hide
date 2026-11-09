@@ -45,7 +45,7 @@ int main() {
         assert(api.unloads == 0); // Never request unload while a hook may remain.
         assert(api.commits == (failure == 1 ? 1 : 2));
         module.postAppSpecialize(&args);
-        assert(api.unloads == (failure == 3 || failure == 4 ? 0 : 1));
+        assert(api.unloads == 0); // Local hook attempts keep the module loaded.
         assert(!pending && companionFd == -1);
     }
     reset();

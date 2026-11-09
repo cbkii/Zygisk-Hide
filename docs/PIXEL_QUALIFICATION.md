@@ -59,7 +59,7 @@ logs; the included command intentionally avoids keybox and account data.
 | Native build | All four ABIs, release/debug ZIP validation and checksums | CI required |
 | Startup | Three cold boots and repeated normal/isolated app launches without new crashes or ANRs | Not tested on device |
 | Injection | PIF still loads in GMS and the selected Hide paths actually run | Not tested on device |
-| Unloading | No `Hook restoration failed` event; Hide DSO absent after successful cleanup | Not tested on device |
+| Hook restoration and unloading | No `Hook restoration failed` event. Local cleanup keeps Hide mapped after installing hooks. Compare unloading in the loader-managed path. | Not tested on device |
 | Memory | Compare anonymous RX mappings across minimal/full stacks; attribute owner before a proposed fix | Existing ZN/other-module mappings remain outside this module |
 | SELinux | Enforcing unchanged; compare detector policy findings after disabling rule providers and rebooting | Global Magisk/Vector/ZN policy is not removed by Hide |
 | Mounts | Selected app/isolated namespace cleaned; identify exact external PID if detector still flags one | Not tested on device |
@@ -81,9 +81,9 @@ a detector using another policy interface or raw syscall can still observe the
 underlying state. Source-provider changes require their own review and validation.
 
 The previous two anonymous RX regions (880640 and 827392 bytes) predated Hide
-installation. This patch cannot establish their owner. A clean Hide unload is a
-necessary regression gate, not proof those regions disappear. Use loader/module
-A/B evidence before changing memory handling; never unmap unidentified code.
+installation. This patch cannot establish their owner. Verify Hide's hook
+restoration in local mode and unloading in loader mode. Use loader/module A/B
+evidence to attribute the other regions before changing memory handling.
 
 ## November 8 audit and alpha2 comparison
 
@@ -147,8 +147,8 @@ delivers. The package diagnostic also supports a numeric PID for custom names.
 
 The audited arm64 binary matches the v1.0 release SHA-256. Its source uses an
 exact process-name allowlist for the ART remap worker, but never requests
-Zygisk library unloading when it skips a process. This accounts for a module
-mapping outside the allowlist. On selected processes, it replaces executable
+Zygisk library unloading when it skips a process. This could account for a
+mapping outside the allowlist. A rebooted comparison can test its attribution. On selected processes, it replaces executable
 pages from disk and checks them every 100 ms. That can undo other hooks or
 interfere with running code. Keep the Google stack and detector test scoped
 separately when checking for a conflict.

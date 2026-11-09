@@ -22,8 +22,9 @@ the Pixel 9a running Android 16 is tracked in the
   Android supplies a package-specific `app_data_dir`. Manager denylist selection
   remains an independent, additive source. Unattributed isolated processes need
   the manager's process selection; they are not blanket-selected by UID range.
-- Restores temporary specialization hooks before requesting library unloading.
-  If restoration fails, retains the library rather than leaving dangling code.
+- Restores temporary specialisation hooks and keeps the library mapped when
+  local cleanup installs hooks. Loader-managed cleanup requests unloading
+  without installing its own hooks.
 - Bounds companion socket I/O, transfers namespace FDs instead of arbitrary PIDs,
   and treats child failure exits as failures.
 - Removes the heuristic write into `libnativebridge.so`, property-area rewriting

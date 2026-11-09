@@ -3,9 +3,9 @@
 - Improve Magisk Alpha 31000 compatibility through Zygisk API v4. Apply target
   settings to named helpers and recognised app zygotes, and preserve settings
   across upgrades.
-- Restore temporary hooks before unloading. Keep the module loaded if hook
-  restoration fails, handle repeated finalisation safely, and report companion
-  cleanup failures.
+- Restore temporary hooks and keep the library loaded after local hook
+  installation, as required by Zygisk API v4. Handle repeated finalisation
+  safely and report companion cleanup failures.
 - Keep local cleanup as the default. You can ask the Zygisk provider to unmount
   for selected processes. Verify the result in the target's mount namespace.
 - Remove native-bridge patching and global property and remount work from native

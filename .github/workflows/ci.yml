@@ -36,7 +36,8 @@ jobs:
       - name: Validate exact packages
         run: |
           python3 tests/test_packaging.py module/build/outputs/zip/*.zip
-          sha256sum module/build/outputs/zip/*.zip > module/build/outputs/zip/SHA256SUMS
+          cd module/build/outputs/zip
+          sha256sum ./*.zip > SHA256SUMS
       - name: Upload modules and checksums
         uses: actions/upload-artifact@v4
         with:

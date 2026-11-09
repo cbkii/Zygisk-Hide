@@ -122,10 +122,9 @@ public:
         bool restored = true;
         if (uidHooked) restored = old_setresuid && hook("setresuid", old_setresuid) && restored;
         if (unshareHooked) restored = old_unshare && hook("unshare", old_unshare) && restored;
-        // Never unload code that a relocation may still reference. A failed
-        // restoration deliberately retains this DSO and reports degraded state.
-        if (restored) api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
-        else LOGE("Hook restoration failed; retaining module library to avoid dangling code pointers");
+        if (!restored) LOGE("Hook restoration failed; retaining module library to avoid dangling code pointers");
+        // Zygisk API v4 prohibits requesting unload after hooking functions.
+        if (!uidHooked && !unshareHooked) api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
 private:
     template <typename T> bool hook(const char *symbol, T *replacement, T **original = nullptr) {

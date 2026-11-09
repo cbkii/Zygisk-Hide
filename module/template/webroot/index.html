@@ -278,6 +278,7 @@ const state = {
   config: {},         // { "com.example": true, ... }
   dirty: false,
   saving: false,
+  loaded: false,
   filter: "all",       // "all" | "enabled"
   showSystemApps: false,
   query: ""
@@ -392,6 +393,7 @@ function currentList() {
 }
 
 function render() {
+  if (!state.loaded) return;
   const items = currentList();
   if (!items.length) {
     listEl.innerHTML = `<div class="empty">No apps match.</div>`;
@@ -424,6 +426,7 @@ function render() {
 }
 
 function updateStatus() {
+  if (!state.loaded) return;
   const hiddenCount = Object.values(state.config).filter(Boolean).length;
   const poolLabel = state.showSystemApps
     ? `${state.allPkgs.length} apps (incl. system)`
@@ -461,10 +464,14 @@ loaderUnmountToggle.addEventListener("change", async () => {
 });
 
 async function init() {
+  state.loaded = false;
+  reloadBtn.disabled = true;
+  listEl.replaceChildren();
   statusEl.textContent = "Loading installed apps and config…";
   loaderUnmountToggle.disabled = true;
   try {
     await Promise.all([loadPackages(), loadConfig(), loadLoaderUnmount()]);
+    state.loaded = true;
     loaderUnmountToggle.disabled = false;
     updateStatus();
     render();
@@ -473,6 +480,8 @@ async function init() {
     saveBtn.disabled = true;
     listEl.replaceChildren();
     statusEl.textContent = "Error: " + e.message;
+  } finally {
+    reloadBtn.disabled = false;
   }
 }
 
@@ -534,7 +543,7 @@ reloadBtn.addEventListener("click", () => {
 });
 
 saveBtn.addEventListener("click", async () => {
-  if (state.saving) return;
+  if (!state.loaded || state.saving) return;
   const snapshot = JSON.stringify(state.config, null, 2);
   state.saving = true;
   saveBtn.disabled = true;

@@ -83,7 +83,7 @@ const std::vector<mountinfo_entry> &Parsers::parseSelfMountinfo(bool cached)
         iss >> mount_id >> parent_id >> _major >> colon >> _minor >> root >> mount_point >> mount_options;
         if (iss.fail())
         {
-            LOGE("parseSelfMountinfo failed to parse the first 6 fields of line: %s", line.c_str());
+            LOGE("parseSelfMountinfo failed to parse the first 6 fields");
             continue;
         }
 
@@ -95,14 +95,14 @@ const std::vector<mountinfo_entry> &Parsers::parseSelfMountinfo(bool cached)
 
         if (iss.fail())
         {
-            LOGE("parseSelfMountinfo failed to parse the optional fields of line: %s", line.c_str());
+            LOGE("parseSelfMountinfo failed to parse the optional fields");
             continue;
         }
 
         iss >> filesystem_type >> mount_source >> super_options;
         if (iss.fail())
         {
-            LOGE("parseSelfMountinfo failed to parse the last 3 fields of line: %s", line.c_str());
+            LOGE("parseSelfMountinfo failed to parse the last 3 fields");
             continue;
         }
 
