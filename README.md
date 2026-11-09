@@ -1,14 +1,22 @@
 # Zygisk Hide
 
-Per-app namespace cleanup for Magisk, KernelSU and APatch through Zygisk API v4.
-Forked from [snake-4/Zygisk-Assistant](https://github.com/snake-4/Zygisk-Assistant),
-with the per-app WebUI from [kgr-online](https://github.com/kgr-online/Zygisk-Hide).
+Zygisk Hide cleans up the filesystem view of selected Android apps. Choose
+targets in the WebUI or use the root manager's denylist. Hide handles cleanup
+itself by default and can ask the Zygisk provider to do it instead. Read-only
+diagnostics help compare the main app process, helpers and app zygote.
 
-This development build targets Android 14+ and Magisk 26+ (including Alpha's
-31000 version-code family). **Alpha 31000 + Zygisk Next 1.5.2 + Pixel 9a Android
-16 is a qualification target, not a verified device compatibility claim.**
+This fork builds on [snake-4's Zygisk Assistant](https://github.com/snake-4/Zygisk-Assistant)
+and uses the per-app WebUI from [kgr-online's Zygisk Hide](https://github.com/kgr-online/Zygisk-Hide).
+It uses Zygisk API v4 on Magisk, KernelSU and APatch.
 
-## What this build changes
+## Fork build v3.2.0
+
+The build targets Android 14+ and Magisk 26+, including Magisk Alpha version
+code 31000. Runtime qualification for Alpha 31000 with Zygisk Next 1.5.2 on
+the Pixel 9a running Android 16 is tracked in the
+[Pixel qualification guide](docs/PIXEL_QUALIFICATION.md).
+
+### What's changed
 
 - Covers conventional `package:process` helpers and custom process names when
   Android supplies a package-specific `app_data_dir`. Manager denylist selection
@@ -28,8 +36,8 @@ This development build targets Android 14+ and Magisk 26+ (including Alpha's
 ## Installation and configuration
 
 1. Disable another enabled Zygisk Assistant/Hide instance and reboot first.
-2. Install a ZIP from this fork's CI artifacts. Prefer the release build. Debug
-   builds log process names and are intended for a short diagnostic comparison.
+2. Install the release ZIP through your root manager and reboot. CI also provides
+   debug ZIPs that log process names for short diagnostic comparisons.
 3. Use **one** Zygisk provider. With **Zygisk Next**, leave Magisk's built-in
    Zygisk **off**. With Magisk's own provider, enable built-in Zygisk instead.
 4. Full denylist enforcement/exclusion can prevent this and PIF from loading.
@@ -77,6 +85,9 @@ its app zygote and isolated children.
 The packaged diagnostic accepts a numeric PID or `--package PACKAGE`. Package
 mode reports the main process, conventional helpers and the app zygote. Compare
 mapping categories and region sizes across runs, since addresses change with ASLR.
+Use `--inline-scope [PROCESS ...]` to see which exact processes Inline Hook
+Invalidate is configured to target. The scope report reads saved configuration.
+Use a rebooted comparison to verify actual process behaviour.
 
 ## Detector and Integrity limitations
 
@@ -103,8 +114,7 @@ supports 16 KiB page alignment. Host tests cover config, process selection,
 short/dead-peer/timeout IPC and hook restoration failures; they do not simulate
 Android permissions or prove the loader ABI works on a phone.
 
-No release is automatically published by this development workflow. The alpha
-ZIP intentionally has no automatic update feed until this fork publishes a
-qualified release; it cannot silently install another fork's update.
+This fork uses manual ZIP installation. To roll back, disable Zygisk Hide in
+your root manager and reboot. Your target settings are kept separately.
 
 MIT licence. Original credits and licence notices are retained in the source.

@@ -1,3 +1,20 @@
+## v3.2.0
+
+- Improve Magisk Alpha 31000 compatibility through Zygisk API v4. Apply target
+  settings to named helpers and recognised app zygotes, and preserve settings
+  across upgrades.
+- Restore temporary hooks before unloading. Keep the module loaded if hook
+  restoration fails, handle repeated finalisation safely, and report companion
+  cleanup failures.
+- Keep local cleanup as the default. You can ask the Zygisk provider to unmount
+  for selected processes. Verify the result in the target's mount namespace.
+- Remove native-bridge patching and global property and remount work from native
+  cleanup. Legacy boot-property scripts are opt-in.
+- Add read-only process-family diagnostics for namespaces, mounts and executable
+  mappings, plus exact-process scope checks for Inline Hook Invalidate.
+- Install manually through your root manager and reboot. Disable the module
+  and reboot to roll back.
+
 ## 3.0.1
 * Added WebUI (webroot) for per-app root/Zygisk hide toggling, independent of the manager's own denylist.
 * Hide decision is now additive: manager denylist OR WebUI config, either is enough.
@@ -15,29 +32,3 @@
 
 ## 2.1.2
 + Added scripts to reset sensitive props.
-
-## v3.2.0-alpha1 (development)
-
-- Target Alpha 31000 through the unchanged public Zygisk API v4.
-- Fix subprocess selection, failed-child reporting, bounded companion I/O,
-  namespace FD handoff and unload-after-restoration lifecycle.
-- Remove heuristic native-bridge editing and native global-property/remount work.
-- Default global boot-property scripts to opt-in; add no SELinux rule.
-- Persist and atomically save target config outside module updates.
-- Add host regression tests, package validation and Pixel qualification guidance.
-- Fix repeated/recursive finalization and allocation-failure handling during module unload.
-- Disable the alpha update feed pending a qualified release.
-- Device qualification and Google verdicts remain unverified.
-
-## v3.2.0-alpha2 (development)
-
-- Optional provider unmount through the public Zygisk API, avoiding Hide's own
-  mount hooks in that mode.
-- Match AOSP app-zygote names when the loader identifies the child zygote.
-- Compare mapping signatures, mount markers and identities across an app's
-  process family.
-
-## v3.2.0-alpha3 (development)
-
-- Add read-only Inline Hook Invalidate scope checks for Google and explicit
-  process names, with a separate device A/B procedure.
